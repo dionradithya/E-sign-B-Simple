@@ -1,0 +1,73 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/config.2.0.schema.json",
+  "version": "2.0",
+  "bundles": {
+    "specimen-web-part": {
+      "components": [
+        {
+          "entrypoint": "./lib/webparts/specimen/SpecimenWebPart.js",
+          "manifest": "./src/webparts/specimen/SpecimenWebPart.manifest.json"
+        }
+      ]
+    },
+    "initiate-esign-command-set": {
+      "components": [
+        {
+          "entrypoint": "./lib/extensions/initiateEsign/InitiateEsignCommandSet.js",
+          "manifest": "./src/extensions/initiateEsign/InitiateEsignCommandSet.manifest.json"
+        }
+      ]
+    },
+    "initiate-esign-form-form-customizer": {
+      "components": [
+        {
+          "entrypoint": "./lib/extensions/initiateEsignForm/InitiateEsignFormFormCustomizer.js",
+          "manifest": "./src/extensions/initiateEsignForm/InitiateEsignFormFormCustomizer.manifest.json"
+        }
+      ]
+    },
+    "initiate-signature-web-part": {
+      "components": [
+        {
+          "entrypoint": "./lib/webparts/initiateSignature/InitiateSignatureWebPart.js",
+          "manifest": "./src/webparts/initiateSignature/InitiateSignatureWebPart.manifest.json"
+        }
+      ]
+    },
+    "document-tracker-esign-web-part": {
+      "components": [
+        {
+          "entrypoint": "./lib/webparts/documentTrackerEsign/DocumentTrackerEsignWebPart.js",
+          "manifest": "./src/webparts/documentTrackerEsign/DocumentTrackerEsignWebPart.manifest.json"
+        }
+      ]
+    },
+    "esign-task-list-web-part": {
+      "components": [
+        {
+          "entrypoint": "./lib/webparts/esignTaskList/EsignTaskListWebPart.js",
+          "manifest": "./src/webparts/esignTaskList/EsignTaskListWebPart.manifest.json"
+        }
+      ]
+    },
+    "doc-integrity-checker-web-part": {
+      "components": [
+        {
+          "entrypoint": "./lib/webparts/docIntegrityChecker/DocIntegrityCheckerWebPart.js",
+          "manifest": "./src/webparts/docIntegrityChecker/DocIntegrityCheckerWebPart.manifest.json"
+        }
+      ]
+    }
+  },
+  "externals": {},
+  "localizedResources": {
+    "SpecimenWebPartStrings": "lib/webparts/specimen/loc/{locale}.js",
+    "InitiateEsignCommandSetStrings": "lib/extensions/initiateEsign/loc/{locale}.js",
+    "InitiateEsignFormFormCustomizerStrings": "lib/extensions/initiateEsignForm/loc/{locale}.js",
+    "InitiateSignatureWebPartStrings": "lib/webparts/initiateSignature/loc/{locale}.js",
+    "ControlStrings": "node_modules/@pnp/spfx-controls-react/lib/loc/{locale}.js",
+    "DocumentTrackerEsignWebPartStrings": "lib/webparts/documentTrackerEsign/loc/{locale}.js",
+    "EsignTaskListWebPartStrings": "lib/webparts/esignTaskList/loc/{locale}.js",
+    "DocIntegrityCheckerWebPartStrings": "lib/webparts/docIntegrityChecker/loc/{locale}.js"
+  }
+}

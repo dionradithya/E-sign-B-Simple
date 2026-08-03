@@ -1,0 +1,67 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/spfx-serve.schema.json",
+  "port": 4321,
+  "https": true,
+  "initialPage": "https://bumiresources.sharepoint.com/_layouts/workbench.aspx",
+  "serveConfigurations": {
+    "default": {
+      "pageUrl": "https://bumiresources.sharepoint.com/sites/dms/_layouts/15/workbench.aspx"
+    },
+    "workbench": {
+      "pageUrl": "https://bumiresources.sharepoint.com/sites/ApprovalTest/_layouts/15/workbench.aspx"
+    },
+    "initiateEsign": {
+      "pageUrl": "https://bumiresources.sharepoint.com/sites/ApprovalTest/Shared%20Documents/Forms/AllItems.aspx",
+      "customActions": {
+        "875b1a04-22f4-4ec5-95a6-dd18490d1c69": {
+          "location": "ClientSideExtension.ListViewCommandSet.ContextMenu",
+          "properties": {
+            "sampleTextOne": "One item is selected in the list",
+            "sampleTextTwo": "This command is always visible."
+          }
+        }
+      }
+    },
+    "initiateEsignForm_NewForm": {
+      "pageUrl": "https://{tenantDomain}/sites/ApprovalTest/_layouts/15/SPListForm.aspx",
+      "formCustomizer": {
+        "componentId": "c87d879a-9cb0-467b-81c0-34ce5b484d18",
+        "PageType": 8,
+        "RootFolder": "/sites/ApprovalTest/Lists/Tasks",
+        "properties": {
+          "sampleText": "Value"
+        }
+      }
+    },
+    "initiateEsignForm_EditForm": {
+      "pageUrl": "https://{tenantDomain}/sites/ApprovalTest/_layouts/15/SPListForm.aspx",
+      "formCustomizer": {
+        "componentId": "c87d879a-9cb0-467b-81c0-34ce5b484d18",
+        "PageType": 6,
+        "RootFolder": "/sites/ApprovalTest/Lists/Tasks",
+        "ID": 121,
+        "properties": {
+          "sampleText": "Value"
+        }
+      }
+    },
+    "initiateEsignForm_ViewForm": {
+      "pageUrl": "https://{tenantDomain}/sites/ApprovalTest/_layouts/15/SPListForm.aspx",
+      "formCustomizer": {
+        "componentId": "c87d879a-9cb0-467b-81c0-34ce5b484d18",
+        "PageType": 4,
+        "RootFolder": "/sites/ApprovalTest/Lists/Tasks",
+        "ID": 121,
+        "properties": {
+          "sampleText": "Value"
+        }
+      }
+    },
+    "specimen": {
+      "pageUrl": "https://{tenantDomain}/sites/dms/_layouts/15/workbench.aspx"
+    },
+    "documentTrackerEsign": {
+      "pageUrl": "https://{tenantDomain}/sites/DMS/SitePages/Document-Tracker.aspx"
+    }
+  }
+}

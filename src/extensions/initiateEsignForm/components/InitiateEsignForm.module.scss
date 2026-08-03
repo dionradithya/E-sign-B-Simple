@@ -1,0 +1,15 @@
+.initiateEsignForm {
+  background-color: "[theme:white, default:#ffffff]";
+  color: "[theme:themePrimary, default:#0078d4]";
+  padding: 0.5rem;
+  
+  // Ensure proper touch handling on mobile
+  -webkit-overflow-scrolling: touch;
+}
+
+// Mobile-first responsive adjustments
+@media (max-width: 768px) {
+  .initiateEsignForm {
+    padding: 0.25rem;
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "name": "e-sign-project-node-20",
+  "version": "0.0.1",
+  "private": true,
+  "engines": {
+    "node": ">=22.14.0 < 23.0.0"
+  },
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "heft build --clean",
+    "build:ship": "heft build --clean --production",
+    "clean": "heft clean",
+    "test": "heft test --clean",
+    "serve": "heft start --clean",
+    "package": "heft build --clean --production && heft package-solution --production"
+  },
+  "dependencies": {
+    "@fluentui/react": "^8.106.4",
+    "@fluentui/react-components": "^9.66.1",
+    "@fluentui/react-icons": "^2.0.305",
+    "@microsoft/decorators": "1.22.2",
+    "@microsoft/sp-component-base": "1.22.2",
+    "@microsoft/sp-core-library": "1.22.2",
+    "@microsoft/sp-dialog": "1.22.2",
+    "@microsoft/sp-listview-extensibility": "1.22.2",
+    "@microsoft/sp-lodash-subset": "1.22.2",
+    "@microsoft/sp-office-ui-fabric-core": "1.22.2",
+    "@microsoft/sp-property-pane": "1.22.2",
+    "@microsoft/sp-webpart-base": "1.22.2",
+    "@pnp/graph": "^4.14.0",
+    "@pnp/logging": "^4.14.0",
+    "@pnp/sp": "^4.14.0",
+    "@pnp/spfx-controls-react": "^3.24.0",
+    "@popperjs/core": "^2.11.8",
+    "bootstrap": "^5.3.6",
+    "jsqr": "^1.4.0",
+    "pdf-lib": "^1.17.1",
+    "qrcode-with-logos": "^1.1.1",
+    "react": "17.0.1",
+    "react-dom": "17.0.1",
+    "react-pdf": "^9.2.1",
+    "signature_pad": "^5.0.9",
+    "tslib": "^2.6.2"
+  },
+  "devDependencies": {
+    "@microsoft/eslint-config-spfx": "1.22.2",
+    "@microsoft/eslint-plugin-spfx": "1.22.2",
+    "@microsoft/sp-module-interfaces": "1.22.2",
+    "@microsoft/spfx-heft-plugins": "1.22.2",
+    "@microsoft/spfx-web-build-rig": "1.22.2",
+    "@rushstack/eslint-config": "4.0.1",
+    "@rushstack/heft": "1.1.2",
+    "@types/react": "17.0.45",
+    "@types/react-dom": "17.0.17",
+    "@types/webpack-env": "~1.15.2",
+    "ajv": "^8.17.1",
+    "eslint": "8.57.1",
+    "eslint-plugin-react-hooks": "4.3.0",
+    "typescript": "~5.3.3"
+  }
+}

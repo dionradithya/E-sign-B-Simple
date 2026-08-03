@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Elements xmlns="http://schemas.microsoft.com/sharepoint/">
+    <ClientSideComponentInstance
+        Title="InitiateEsign"
+        Location="ClientSideExtension.ListViewCommandSet.ContextMenu"
+        ListTemplateId="101"
+        Properties="{&quot;sampleTextOne&quot;:&quot;One item is selected in the list.&quot;, &quot;sampleTextTwo&quot;:&quot;This command is always visible.&quot;}"
+        ComponentId="875b1a04-22f4-4ec5-95a6-dd18490d1c69" />
+</Elements>

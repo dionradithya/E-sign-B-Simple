@@ -1,0 +1,11 @@
+export const TENANT_DOMAIN = "https://bumiresources.sharepoint.com";
+export const SITES_ESIGN = "sites/ESign";
+export const LIST_PROCESS = "Approvals Process";
+export const LIST_TASKS = "Tasks";
+export const LIST_ACTIVITY_LOG = "Activity Log";
+export const SITE_REDIRECT = "sites/DMS";
+export const DATABASE_SPECIMEN = "Specimen";
+export const LIST_APPROVAL_MAP = "Approval Map";
+export const LIST_ACTIVE_SITES = "Active Sites";
+export const PAGE_INITIATE_ESIGN = "RequestSignatures.aspx";
+export const LIST_WHITELIST_WA = "Whitelist WA Notification";
