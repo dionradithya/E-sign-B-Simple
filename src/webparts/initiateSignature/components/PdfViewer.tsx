@@ -266,6 +266,7 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
   };
 
   function onDocumentLoadSuccess({ numPages }: { numPages: number }): void {
+    console.log("PDF LOADED:", numPages);
     setNumPages(numPages);
     onDocumentLoaded?.(numPages);
   }

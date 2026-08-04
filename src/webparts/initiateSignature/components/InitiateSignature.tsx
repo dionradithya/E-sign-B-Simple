@@ -140,6 +140,10 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
         console.log("TOTAL PDF PAGES:", numPages);
     }, [numPages]);
 
+    useEffect(() => {
+        console.log("NUMPAGES STATE:", numPages);
+    }, [numPages]);
+
     const handleSignatureDrop = (page: number, x: number, y: number, approverId: number, type: 'initial' | 'signature', checklistName: boolean, checklistDate: boolean, checklistBadge: boolean, widthPercent?: number, heightPercent?: number): void => {
         const newPlaceholder: ISignaturePlaceholder = {
             id: Date.now().toString() + Math.random().toString(),
@@ -458,6 +462,8 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                         onReviewerCanDownloadChange={setReviewerCanDownload}
                         embedQrCode={embedQrCode}
                         onEmbedQrCodeChange={setEmbedQrCode}
+                        placementMode={placementMode}
+                        onPlacementModeChange={setPlacementMode}
                     />
                 </div>
 
