@@ -33,6 +33,7 @@ interface IPdfViewerProps {
   onDrop: (page: number, x: number, y: number, approverId: number, type: 'initial' | 'signature', checklistName: boolean, checklistDate: boolean, checklistBadge: boolean, widthPercent?: number, heightPercent?: number) => void;
   onUpdatePlaceholder: (id: string, updates: Partial<ISignaturePlaceholder>) => void;
   onRemovePlaceholder: (id: string) => void;
+  onDocumentLoaded?: (numPages: number) => void;
 }
 
 const PdfViewer: React.FC<IPdfViewerProps> = ({
@@ -41,7 +42,8 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
   approvers,
   onDrop,
   onUpdatePlaceholder,
-  onRemovePlaceholder
+  onRemovePlaceholder,
+  onDocumentLoaded
 }) => {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pdfWrapperWidth, setPdfWrapperWidth] = useState<number>(600); // Default start
@@ -264,7 +266,9 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
   };
 
   function onDocumentLoadSuccess({ numPages }: { numPages: number }): void {
+    console.log("PDF LOADED:", numPages);
     setNumPages(numPages);
+    onDocumentLoaded?.(numPages);
   }
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>, pageNumber: number): void => {

@@ -17,6 +17,7 @@ export interface IApprover {
     includeName: boolean;
     includeDate: boolean;
     includeBadge: boolean;
+    placementMode: 'current' | 'all';
 }
 
 interface ISidebarProps {
@@ -34,6 +35,8 @@ interface ISidebarProps {
     onReviewerCanDownloadChange: (checked: boolean) => void;
     embedQrCode: boolean;
     onEmbedQrCodeChange: (checked: boolean) => void;
+    placementMode: 'current' | 'all';
+    onPlacementModeChange: (mode: 'current' | 'all') => void;
 }
 
 const Sidebar: React.FC<ISidebarProps> = ({
@@ -50,7 +53,9 @@ const Sidebar: React.FC<ISidebarProps> = ({
     reviewerCanDownload,
     onReviewerCanDownloadChange,
     embedQrCode,
-    onEmbedQrCodeChange
+    onEmbedQrCodeChange,
+    placementMode,
+    onPlacementModeChange,
 }): React.ReactElement => {
 
     // Temporary store for selected people picker items
@@ -120,7 +125,8 @@ const Sidebar: React.FC<ISidebarProps> = ({
                     badgeNumber: badgeNumber,
                     includeName: false,
                     includeDate: false,
-                    includeBadge: false
+                    includeBadge: false,
+                    placementMode: 'current'
                 };
                 newApprovers.push(newApprover);
             }
@@ -179,6 +185,23 @@ const Sidebar: React.FC<ISidebarProps> = ({
         onApproversChange(updated);
     };
 
+    const handlePlacementModeChange = (
+        id: number,
+        mode: 'current' | 'all'
+    ): void => {
+
+        const updated = approvers.map(a =>
+            a.id === id
+                ? {
+                    ...a,
+                    placementMode: mode
+                }
+                : a
+        );
+
+        onApproversChange(updated);
+    };
+
     const handleMoveUp = (index: number): void => {
         if (index === 0) return;
         const updated = [...approvers];
@@ -223,6 +246,36 @@ const Sidebar: React.FC<ISidebarProps> = ({
                     />
                 </div>
             </div>
+
+            {/* <div className="mb-4">
+                <Label>Placement Mode</Label>
+
+                <div className="form-check">
+                    <input
+                        className="form-check-input"
+                        type="radio"
+                        name="placementMode"
+                        checked={placementMode === 'current'}
+                        onChange={() => onPlacementModeChange('current')}
+                    />
+                    <label className="form-check-label">
+                        Current Page
+                    </label>
+                </div>
+
+                <div className="form-check">
+                    <input
+                        className="form-check-input"
+                        type="radio"
+                        name="placementMode"
+                        checked={placementMode === 'all'}
+                        onChange={() => onPlacementModeChange('all')}
+                    />
+                    <label className="form-check-label">
+                        All Pages
+                    </label>
+                </div>
+            </div> */}
 
             <div className="mb-4">
                 <Label>2. Manage Approvers & Fields</Label>
@@ -309,6 +362,46 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                             label: { fontSize: 12 }
                                         }}
                                     />
+
+                                    <div className="mt-2 mb-3">
+                                        <Label>Placement Mode</Label>
+
+                                        <div className="form-check">
+                                            <input
+                                                className="form-check-input"
+                                                type="radio"
+                                                name={`placement-${approver.id}`}
+                                                checked={approver.placementMode === 'current'}
+                                                onChange={() =>
+                                                    handlePlacementModeChange(
+                                                        approver.id,
+                                                        'current'
+                                                    )
+                                                }
+                                            />
+                                            <label className="form-check-label">
+                                                Current Page
+                                            </label>
+                                        </div>
+
+                                        <div className="form-check">
+                                            <input
+                                                className="form-check-input"
+                                                type="radio"
+                                                name={`placement-${approver.id}`}
+                                                checked={approver.placementMode === 'all'}
+                                                onChange={() =>
+                                                    handlePlacementModeChange(
+                                                        approver.id,
+                                                        'all'
+                                                    )
+                                                }
+                                            />
+                                            <label className="form-check-label">
+                                                All Pages
+                                            </label>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 {/* Drag Buttons - tap on mobile, drag on desktop */}
@@ -337,6 +430,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
                             </div>
                         );
                     })}
+                    
                     {approvers.length === 0 && <div className="text-muted small fst-italic text-center py-3">No approvers added yet. Add someone above!</div>}
                 </Stack>
             </div>
