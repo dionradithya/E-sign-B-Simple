@@ -144,31 +144,99 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
         console.log("NUMPAGES STATE:", numPages);
     }, [numPages]);
 
-    const handleSignatureDrop = (page: number, x: number, y: number, approverId: number, type: 'initial' | 'signature', checklistName: boolean, checklistDate: boolean, checklistBadge: boolean, widthPercent?: number, heightPercent?: number): void => {
-        const approver = approvers.find(
-            a => a.id === approverId
-        );
+    // const handleSignatureDrop = (page: number, x: number, y: number, approverId: number, type: 'initial' | 'signature', checklistName: boolean, checklistDate: boolean, checklistBadge: boolean, widthPercent?: number, heightPercent?: number): void => {
+    //     const approver = approvers.find(
+    //         a => a.id === approverId
+    //     );
 
-        console.log(
-            "PLACEMENT MODE:",
-            approver?.placementMode
-        );
+    //     console.log(
+    //         "PLACEMENT MODE:",
+    //         approver?.placementMode
+    //     );
 
-        const newPlaceholder: ISignaturePlaceholder = {
-            id: Date.now().toString() + Math.random().toString(),
-            page,
-            x, // Now receiving percentage
-            y, // Now receiving percentage
-            approverId,
-            checklistName,
-            checklistDate,
-            checklistBadge,
-            type,
-            width: widthPercent || 20, // Default to 20% if undefined, though it should be defined
-            height: heightPercent || 15 // Default to 15% if undefined
+    //     const newPlaceholder: ISignaturePlaceholder = {
+    //         id: Date.now().toString() + Math.random().toString(),
+    //         page,
+    //         x, // Now receiving percentage
+    //         y, // Now receiving percentage
+    //         approverId,
+    //         checklistName,
+    //         checklistDate,
+    //         checklistBadge,
+    //         type,
+    //         width: widthPercent || 20, // Default to 20% if undefined, though it should be defined
+    //         height: heightPercent || 15 // Default to 15% if undefined
+    //     };
+    //     setPlaceholders([...placeholders, newPlaceholder]);
+    // };
+
+        const handleSignatureDrop = (
+            page: number,
+            x: number,
+            y: number,
+            approverId: number,
+            type: 'initial' | 'signature',
+            checklistName: boolean,
+            checklistDate: boolean,
+            checklistBadge: boolean,
+            widthPercent?: number,
+            heightPercent?: number
+        ): void => {
+
+            const approver = approvers.find(
+                a => a.id === approverId
+            );
+
+            // ALL PAGES
+            if (approver?.placementMode === 'all') {
+
+                const newPlaceholders: ISignaturePlaceholder[] = [];
+
+                for (let p = 1; p <= numPages; p++) {
+
+                    newPlaceholders.push({
+                        id: `${Date.now()}-${p}-${Math.random()}`,
+                        page: p,
+                        x,
+                        y,
+                        approverId,
+                        checklistName,
+                        checklistDate,
+                        checklistBadge,
+                        type,
+                        width: widthPercent || 20,
+                        height: heightPercent || 15
+                    });
+                }
+
+                setPlaceholders([
+                    ...placeholders,
+                    ...newPlaceholders
+                ]);
+
+                return;
+            }
+
+            // CURRENT PAGE
+            const newPlaceholder: ISignaturePlaceholder = {
+                id: Date.now().toString() + Math.random().toString(),
+                page,
+                x,
+                y,
+                approverId,
+                checklistName,
+                checklistDate,
+                checklistBadge,
+                type,
+                width: widthPercent || 20,
+                height: heightPercent || 15
+            };
+
+            setPlaceholders([
+                ...placeholders,
+                newPlaceholder
+            ]);
         };
-        setPlaceholders([...placeholders, newPlaceholder]);
-    };
 
     const updatePlaceholder = (id: string, updates: Partial<ISignaturePlaceholder>): void => {
         setPlaceholders(placeholders.map(p => p.id === id ? { ...p, ...updates } : p));
