@@ -3,7 +3,7 @@
   "solution": {
     "name": "ESignV2",
     "id": "3f1e8a1e-6f24-4c4f-9d7c-0a8b9e6d9c21",
-    "version": "1.8.0.9",
+    "version": "1.8.0.10",
     "includeClientSideAssets": true,
     "skipFeatureDeployment": true,
     "isDomainIsolated": false,
@@ -30,7 +30,7 @@
         "title": "ESignV2 Feature",
         "description": "The feature that activates elements of the e-sign-project-node-20 solution.",
         "id": "fc57b932-3bdf-4c0d-b0e9-7bde7117ebd0",
-        "version": "1.8.0.9",
+        "version": "1.8.0.10",
         "assets": {
           "elementManifests": [
             "elements.xml",

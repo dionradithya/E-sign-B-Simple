@@ -145,6 +145,15 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
     }, [numPages]);
 
     const handleSignatureDrop = (page: number, x: number, y: number, approverId: number, type: 'initial' | 'signature', checklistName: boolean, checklistDate: boolean, checklistBadge: boolean, widthPercent?: number, heightPercent?: number): void => {
+        const approver = approvers.find(
+            a => a.id === approverId
+        );
+
+        console.log(
+            "PLACEMENT MODE:",
+            approver?.placementMode
+        );
+
         const newPlaceholder: ISignaturePlaceholder = {
             id: Date.now().toString() + Math.random().toString(),
             page,
