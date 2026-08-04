@@ -246,6 +246,17 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
         setPlaceholders(placeholders.filter(p => p.id !== id));
     };
 
+    const clearApproverPlaceholders = (
+        approverId: number
+    ): void => {
+
+        setPlaceholders(
+            placeholders.filter(
+                p => p.approverId !== approverId
+            )
+        );
+    };
+
     const handleRemoveApprover = (id: number): void => {
         setApprovers(approvers.filter(a => a.id !== id));
         setPlaceholders(placeholders.filter(p => p.approverId !== id));
@@ -541,6 +552,7 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                         onEmbedQrCodeChange={setEmbedQrCode}
                         placementMode={placementMode}
                         onPlacementModeChange={setPlacementMode}
+                        onClearApproverPlaceholders={clearApproverPlaceholders}
                     />
                 </div>
 

@@ -37,6 +37,7 @@ interface ISidebarProps {
     onEmbedQrCodeChange: (checked: boolean) => void;
     placementMode: 'current' | 'all';
     onPlacementModeChange: (mode: 'current' | 'all') => void;
+    onClearApproverPlaceholders: (approverId: number) => void;
 }
 
 const Sidebar: React.FC<ISidebarProps> = ({
@@ -56,6 +57,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
     onEmbedQrCodeChange,
     placementMode,
     onPlacementModeChange,
+    onClearApproverPlaceholders
 }): React.ReactElement => {
 
     // Temporary store for selected people picker items
@@ -427,10 +429,24 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                         Signature
                                     </button>
                                 </div>
+
+                                    <div className="mb-2">
+                                        <button
+                                            type="button"
+                                            className="btn btn-sm btn-outline-danger w-100"
+                                            onClick={() =>
+                                                onClearApproverPlaceholders(
+                                                    approver.id
+                                                )
+                                            }
+                                        >
+                                            Clear Placeholder
+                                        </button>
+                                    </div>
                             </div>
                         );
                     })}
-                    
+
                     {approvers.length === 0 && <div className="text-muted small fst-italic text-center py-3">No approvers added yet. Add someone above!</div>}
                 </Stack>
             </div>
