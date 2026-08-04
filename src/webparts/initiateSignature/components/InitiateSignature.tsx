@@ -144,32 +144,6 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
         console.log("NUMPAGES STATE:", numPages);
     }, [numPages]);
 
-    // const handleSignatureDrop = (page: number, x: number, y: number, approverId: number, type: 'initial' | 'signature', checklistName: boolean, checklistDate: boolean, checklistBadge: boolean, widthPercent?: number, heightPercent?: number): void => {
-    //     const approver = approvers.find(
-    //         a => a.id === approverId
-    //     );
-
-    //     console.log(
-    //         "PLACEMENT MODE:",
-    //         approver?.placementMode
-    //     );
-
-    //     const newPlaceholder: ISignaturePlaceholder = {
-    //         id: Date.now().toString() + Math.random().toString(),
-    //         page,
-    //         x, // Now receiving percentage
-    //         y, // Now receiving percentage
-    //         approverId,
-    //         checklistName,
-    //         checklistDate,
-    //         checklistBadge,
-    //         type,
-    //         width: widthPercent || 20, // Default to 20% if undefined, though it should be defined
-    //         height: heightPercent || 15 // Default to 15% if undefined
-    //     };
-    //     setPlaceholders([...placeholders, newPlaceholder]);
-    // };
-
         const handleSignatureDrop = (
             page: number,
             x: number,
@@ -193,6 +167,64 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                 const newPlaceholders: ISignaturePlaceholder[] = [];
 
                 for (let p = 1; p <= numPages; p++) {
+
+                    newPlaceholders.push({
+                        id: `${Date.now()}-${p}-${Math.random()}`,
+                        page: p,
+                        x,
+                        y,
+                        approverId,
+                        checklistName,
+                        checklistDate,
+                        checklistBadge,
+                        type,
+                        width: widthPercent || 20,
+                        height: heightPercent || 15
+                    });
+                }
+
+                setPlaceholders([
+                    ...placeholders,
+                    ...newPlaceholders
+                ]);
+
+                return;
+            }
+
+            // PAGE RANGE
+            if (approver?.placementMode === 'range') {
+
+                const fromPage =
+                    approver.rangeFromPage || 1;
+
+                const toPage =
+                    approver.rangeToPage || 1;
+
+                if (fromPage > toPage) {
+
+                    alert(
+                        'From Page cannot be greater than To Page'
+                    );
+
+                    return;
+                }
+
+                if (toPage > numPages) {
+
+                    alert(
+                        `This PDF only has ${numPages} pages`
+                    );
+
+                    return;
+                }
+
+                const newPlaceholders: ISignaturePlaceholder[] = [];
+
+                for (
+                    let p = fromPage;
+                    p <= toPage;
+                    p++
+                ) {
 
                     newPlaceholders.push({
                         id: `${Date.now()}-${p}-${Math.random()}`,
