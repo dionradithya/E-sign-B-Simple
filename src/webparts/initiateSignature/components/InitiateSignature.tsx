@@ -29,7 +29,7 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
     const [approvers, setApprovers] = useState<IApprover[]>([]);
     const [approvalMap, setApprovalMap] = useState<IApprovalMapItem[]>([]);
     const [placeholders, setPlaceholders] = useState<ISignaturePlaceholder[]>([]);
-    const [placementMode, setPlacementMode] = useState<'current' | 'all'>('current');
+    const [placementMode, setPlacementMode] = useState<'current' | 'all' | 'range'>('current');
     const [numPages, setNumPages] = useState<number>(0);
     const [isSaving, setIsSaving] = useState<boolean>(false);
     const [validationTriggered, setValidationTriggered] = useState<boolean>(false);
