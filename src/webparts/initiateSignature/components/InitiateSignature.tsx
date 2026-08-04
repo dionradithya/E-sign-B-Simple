@@ -29,6 +29,8 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
     const [approvers, setApprovers] = useState<IApprover[]>([]);
     const [approvalMap, setApprovalMap] = useState<IApprovalMapItem[]>([]);
     const [placeholders, setPlaceholders] = useState<ISignaturePlaceholder[]>([]);
+    const [placementMode, setPlacementMode] = useState<'current' | 'all'>('current');
+    const [numPages, setNumPages] = useState<number>(0);
     const [isSaving, setIsSaving] = useState<boolean>(false);
     const [validationTriggered, setValidationTriggered] = useState<boolean>(false);
     const [hideDialog, setHideDialog] = useState<boolean>(true);
@@ -132,6 +134,11 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
 
         fetchMap().catch(console.error);
     }, [context]);
+
+    // TEMPORARY
+    useEffect(() => {
+        console.log("TOTAL PDF PAGES:", numPages);
+    }, [numPages]);
 
     const handleSignatureDrop = (page: number, x: number, y: number, approverId: number, type: 'initial' | 'signature', checklistName: boolean, checklistDate: boolean, checklistBadge: boolean, widthPercent?: number, heightPercent?: number): void => {
         const newPlaceholder: ISignaturePlaceholder = {
@@ -428,6 +435,7 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                                 onDrop={handleSignatureDrop}
                                 onUpdatePlaceholder={updatePlaceholder}
                                 onRemovePlaceholder={removePlaceholder}
+                                onDocumentLoaded={setNumPages}
                             />
                         </>
                     )}
