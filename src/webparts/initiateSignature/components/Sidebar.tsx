@@ -17,9 +17,10 @@ export interface IApprover {
     includeName: boolean;
     includeDate: boolean;
     includeBadge: boolean;
-    placementMode: 'current' | 'all' | 'range';
+    placementMode: 'current' | 'all' | 'range' | 'selected';
     rangeFromPage?: number;
     rangeToPage?: number;
+    selectedPages?: number[];
 }
 
 interface ISidebarProps {
@@ -37,9 +38,10 @@ interface ISidebarProps {
     onReviewerCanDownloadChange: (checked: boolean) => void;
     embedQrCode: boolean;
     onEmbedQrCodeChange: (checked: boolean) => void;
-    placementMode: 'current' | 'all' | 'range';
+    placementMode: 'current' | 'all' | 'range' | 'selected';
     onPlacementModeChange: (mode: 'current' | 'all' | 'range') => void;
     onClearApproverPlaceholders: (approverId: number) => void;
+    numPages: number;
 }
 
 const Sidebar: React.FC<ISidebarProps> = ({
@@ -59,7 +61,8 @@ const Sidebar: React.FC<ISidebarProps> = ({
     onEmbedQrCodeChange,
     placementMode,
     onPlacementModeChange,
-    onClearApproverPlaceholders
+    onClearApproverPlaceholders,
+    numPages,
 }): React.ReactElement => {
 
     // Temporary store for selected people picker items
@@ -132,7 +135,8 @@ const Sidebar: React.FC<ISidebarProps> = ({
                     includeBadge: false,
                     placementMode: 'current',
                     rangeFromPage: 1,
-                    rangeToPage: 1
+                    rangeToPage: 1,
+                    selectedPages: []
                 };
                 newApprovers.push(newApprover);
             }
@@ -193,7 +197,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
 
         const handlePlacementModeChange = (
             id: number,
-            mode: 'current' | 'all' | 'range'
+            mode: 'current' | 'all' | 'range' | 'selected'
         ): void => {
 
         const updated = approvers.map(a =>
@@ -395,6 +399,108 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                                 Page Range
                                             </label>
                                         </div>
+
+                                        <div className="form-check">
+                                            <input
+                                                className="form-check-input"
+                                                type="radio"
+                                                name={`placement-${approver.id}`}
+                                                checked={
+                                                    approver.placementMode ===
+                                                    'selected'
+                                                }
+                                                onChange={() =>
+                                                    handlePlacementModeChange(
+                                                        approver.id,
+                                                        'selected'
+                                                    )
+                                                }
+                                            />
+                                            <label className="form-check-label">
+                                                Selected Pages
+                                            </label>
+                                        </div>
+
+                                        {
+                                            approver.placementMode === 'selected' && (
+                                                <div
+                                                    className="mt-2 border rounded p-2"
+                                                    style={{
+                                                        maxHeight: '150px',
+                                                        overflowY: 'auto'
+                                                    }}
+                                                >
+                                                    {
+                                                        Array.from(
+                                                            { length: numPages },
+                                                            (_, index) => {
+
+                                                                const page =
+                                                                    index + 1;
+
+                                                                return (
+                                                                    <div
+                                                                        key={page}
+                                                                        className="form-check"
+                                                                    >
+                                                                        <input
+                                                                            className="form-check-input"
+                                                                            type="checkbox"
+
+                                                                            checked={
+                                                                                approver.selectedPages?.includes(page) || false
+                                                                            }
+
+                                                                            onChange={(e) => {
+
+                                                                                const updated = approvers.map(a => {
+
+                                                                                    if (a.id !== approver.id) {
+                                                                                        return a;
+                                                                                    }
+
+                                                                                    const currentPages =
+                                                                                        a.selectedPages || [];
+
+                                                                                    return {
+                                                                                        ...a,
+
+                                                                                        selectedPages:
+                                                                                            e.target.checked
+                                                                                                ? [
+                                                                                                    ...currentPages,
+                                                                                                    page
+                                                                                                ]
+                                                                                                : currentPages.filter(
+                                                                                                    p => p !== page
+                                                                                                )
+                                                                                    };
+                                                                                });
+
+                                                                                onApproversChange(updated);
+                                                                            }}
+                                                                        />
+
+                                                                        <label
+                                                                            className="form-check-label"
+                                                                        >
+                                                                            Page {page}
+                                                                        </label>
+                                                                    </div>
+                                                                );
+                                                            }
+                                                        )
+                                                    }
+                                                    <div className="small text-primary mt-2">
+                                                        Selected:
+                                                        {
+                                                            approver.selectedPages?.join(', ')
+                                                            || ' None'
+                                                        }
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
 
                                         {
                                             approver.placementMode === 'range' && (

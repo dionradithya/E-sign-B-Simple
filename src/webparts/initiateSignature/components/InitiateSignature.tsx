@@ -164,32 +164,36 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
             // ALL PAGES
             if (approver?.placementMode === 'all') {
 
-                const newPlaceholders: ISignaturePlaceholder[] = [];
+            const groupId =
+                `${Date.now()}-${approverId}-${type}`;
 
-                for (let p = 1; p <= numPages; p++) {
+            const newPlaceholders: ISignaturePlaceholder[] = [];
 
-                    newPlaceholders.push({
-                        id: `${Date.now()}-${p}-${Math.random()}`,
-                        page: p,
-                        x,
-                        y,
-                        approverId,
-                        checklistName,
-                        checklistDate,
-                        checklistBadge,
-                        type,
-                        width: widthPercent || 20,
-                        height: heightPercent || 15
-                    });
-                }
+            for (let p = 1; p <= numPages; p++) {
 
-                setPlaceholders([
-                    ...placeholders,
-                    ...newPlaceholders
-                ]);
-
-                return;
+                newPlaceholders.push({
+                    id: `${Date.now()}-${p}-${Math.random()}`,
+                    groupId: groupId,
+                    page: p,
+                    x,
+                    y,
+                    approverId,
+                    checklistName,
+                    checklistDate,
+                    checklistBadge,
+                    type,
+                    width: widthPercent || 20,
+                    height: heightPercent || 15
+                });
             }
+
+            setPlaceholders(prev => [
+                ...prev,
+                ...newPlaceholders
+            ]);
+
+            return;
+        }
 
             // PAGE RANGE
             if (approver?.placementMode === 'range') {
@@ -218,6 +222,9 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                     return;
                 }
 
+                const groupId =
+                    `${Date.now()}-${approverId}-${type}`;
+
                 const newPlaceholders: ISignaturePlaceholder[] = [];
 
                 for (
@@ -228,6 +235,7 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
 
                     newPlaceholders.push({
                         id: `${Date.now()}-${p}-${Math.random()}`,
+                        groupId: groupId,
                         page: p,
                         x,
                         y,
@@ -241,8 +249,67 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                     });
                 }
 
-                setPlaceholders([
-                    ...placeholders,
+                setPlaceholders(prev => [
+                    ...prev,
+                    ...newPlaceholders
+                ]);
+
+                return;
+            }
+
+            // SELECTED PAGES
+            if (approver?.placementMode === 'selected') {
+
+                const pages =
+                    approver.selectedPages || [];
+
+                if (pages.length === 0) {
+
+                    alert(
+                        'Please select at least one page'
+                    );
+
+                    return;
+                }
+
+                const groupId =
+                    `${Date.now()}-${approverId}-${type}`;
+
+                const newPlaceholders: ISignaturePlaceholder[] = [];
+
+                pages.forEach(p => {
+
+                    newPlaceholders.push({
+
+                        id:
+                            `${Date.now()}-${p}-${Math.random()}`,
+
+                        groupId,
+
+                        page: p,
+
+                        x,
+                        y,
+
+                        approverId,
+
+                        checklistName,
+                        checklistDate,
+                        checklistBadge,
+
+                        type,
+
+                        width:
+                            widthPercent || 20,
+
+                        height:
+                            heightPercent || 15
+                    });
+
+                });
+
+                setPlaceholders(prev => [
+                    ...prev,
                     ...newPlaceholders
                 ]);
 
@@ -270,9 +337,55 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
             ]);
         };
 
-    const updatePlaceholder = (id: string, updates: Partial<ISignaturePlaceholder>): void => {
-        setPlaceholders(placeholders.map(p => p.id === id ? { ...p, ...updates } : p));
-    };
+        const updatePlaceholder = (
+            id: string,
+            updates: Partial<ISignaturePlaceholder>
+        ): void => {
+
+            setPlaceholders(prev => {
+
+                const target = prev.find(p => p.id === id);
+
+                if (!target) {
+                    return prev;
+                }
+
+                if (target.groupId) {
+
+                    return prev.map(p => {
+
+                        if (p.groupId !== target.groupId) {
+                            return p;
+                        }
+
+                        return {
+                            ...p,
+                            x: updates.x !== undefined
+                                ? updates.x
+                                : p.x,
+                            y: updates.y !== undefined
+                                ? updates.y
+                                : p.y,
+                            width: updates.width !== undefined
+                                ? updates.width
+                                : p.width,
+                            height: updates.height !== undefined
+                                ? updates.height
+                                : p.height
+                        };
+                    });
+                }
+
+                return prev.map(p =>
+                    p.id === id
+                        ? {
+                            ...p,
+                            ...updates
+                        }
+                        : p
+                );
+            });
+        };
 
     const removePlaceholder = (id: string): void => {
         setPlaceholders(placeholders.filter(p => p.id !== id));
@@ -585,6 +698,7 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                         placementMode={placementMode}
                         onPlacementModeChange={setPlacementMode}
                         onClearApproverPlaceholders={clearApproverPlaceholders}
+                        numPages={numPages}
                     />
                 </div>
 

@@ -24,6 +24,7 @@ export interface ISignaturePlaceholder {
   type: 'initial' | 'signature';
   width: number;
   height: number;
+  groupId?: string;
 }
 
 interface IPdfViewerProps {
