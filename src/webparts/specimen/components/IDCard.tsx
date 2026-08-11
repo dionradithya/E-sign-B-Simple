@@ -381,7 +381,28 @@ export const IDCard: React.FC<IIDCardProps> = ({
                 <Text variant="medium">WhatsApp Notification</Text>
                 <Toggle
                     checked={waStatus}
-                    onChange={(_, checked) => onWaStatusChange(!!checked)}
+                    onChange={(_, checked) => {
+
+                        onWaStatusChange(!!checked);
+
+                        if (checked) {
+
+                            const phoneNumber = "6281181128851";
+
+                            const message =
+                    `Halo B-Simpel Reminder.
+
+                    Saya ingin mengaktifkan notifikasi WhatsApp.
+
+                    Nama: ${displayName}
+                    Email: ${email}`;
+
+                            window.open(
+                                `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`,
+                                "_blank"
+                            );
+                        }
+                    }}
                     disabled={loading || !hasPhone}
                     onText="Active"
                     offText="Inactive"
