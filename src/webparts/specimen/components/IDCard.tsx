@@ -389,13 +389,14 @@ export const IDCard: React.FC<IIDCardProps> = ({
 
                             const phoneNumber = "6281181128851";
 
-                            const message =
-                    `Halo B-Simpel Reminder.
-
-                    Saya ingin mengaktifkan notifikasi WhatsApp.
-
-                    Nama: ${displayName}
-                    Email: ${email}`;
+                            const message = [
+                                "Halo B-Simpel Reminder.",
+                                "",
+                                "Saya ingin mengaktifkan notifikasi WhatsApp.",
+                                "",
+                                `Nama: ${displayName}`,
+                                `Email: ${email}`
+                            ].join("\n");
 
                             window.open(
                                 `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`,
