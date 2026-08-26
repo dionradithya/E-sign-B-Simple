@@ -62,19 +62,12 @@ export class ApprovalService {
         .expand("Official", "onBehalf", "Secretary")
         .top(5000)();
 
-      console.log("APPROVAL MAP RAW DATA:", items);
-
       return items
-        .filter((item) => item.Official && item.Official.Id) // cukup cek Id, jangan EMail
+        .filter((item) => item.Official && item.Official.Id)
         .map((item) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const onBehalfEmails = item.onBehalf
-            ? item.onBehalf.map((u: any) => this.resolveEmail(u)).filter(Boolean).join(";")
-            : "";
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const secretaryEmails = item.Secretary
-            ? item.Secretary.map((u: any) => this.resolveEmail(u)).filter(Boolean).join(";")
-            : "";
+          const onBehalfEmails = this.resolveEmail(item.onBehalf);
+          const secretaryEmails = this.resolveEmail(item.Secretary);
+
           return {
             Id: item.Id,
             Title: item.Title,
@@ -88,7 +81,6 @@ export class ApprovalService {
           };
         });
     } catch (err) {
-      console.error("Error fetching Approval Map:", err);
       return [];
     }
   }
