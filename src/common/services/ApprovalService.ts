@@ -24,38 +24,67 @@ export class ApprovalService {
     this._sp = sp;
   }
 
+  // Translate UPN guest (user_domain.com#EXT#@tenant.onmicrosoft.com) jadi email asli
+  private upnToEmail(upn: string): string {
+    const match = upn.match(/^(.+)#ext#@/i);
+    if (!match) return upn;
+    const raw = match[1];
+    const i = raw.lastIndexOf("_");
+    return i !== -1 ? raw.substring(0, i) + "@" + raw.substring(i + 1) : raw;
+  }
+
+  // Ambil email dari person field: EMail kalau ada (internal), else parse dari Name (guest)
+  private resolveEmail(user: { EMail?: string; Name?: string } | undefined): string {
+    if (!user) return "";
+    if (user.EMail) return user.EMail;
+    if (!user.Name) return "";
+    const claim = user.Name.split("|").pop() ?? "";
+    return this.upnToEmail(claim);
+  }
+
   public async getApprovalMap(): Promise<IApprovalMapItem[]> {
     try {
-      // Fetch Title and User field (expanding User to get details)
-      // Internal Name of 'Email' column is 'User'
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const items: any[] = await this._sp.web.lists
         .getByTitle(LIST_APPROVAL_MAP)
-        // For Official field: .items.select("Id", "Title", "Official/Id", "Official/Title", "Official/EMail", "onBehalf/EMail")
-        // For Official field: .expand("Official", "onBehalf")
-        .items.select("Id", "Title", "Official/Id", "Official/Title", "Official/EMail", "onBehalf/EMail",  "Secretary/EMail")
+        .items.select(
+          "Id",
+          "Title",
+          "Official/Id",
+          "Official/Title",
+          "Official/EMail",
+          "Official/Name",
+          "onBehalf/EMail",
+          "onBehalf/Name",
+          "Secretary/EMail",
+          "Secretary/Name",
+        )
         .expand("Official", "onBehalf", "Secretary")
         .top(5000)();
 
-      // Mapped to interface
+      console.log("APPROVAL MAP RAW DATA:", items);
+
       return items
-        // For Official field: .filter(item => item.Official && item.Official.Id && item.Official.EMail)
-        .filter(item => item.Official && item.Official.Id && item.Official.EMail) // Ensure User (Person) exists
-        .map(item => {
+        .filter((item) => item.Official && item.Official.Id) // cukup cek Id, jangan EMail
+        .map((item) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const onBehalfEmails = item.onBehalf ? item.onBehalf.map((u: any) => u.EMail).join(";") : "";
-          const secretaryEmails = item.Secretary ? item.Secretary.map((u: { EMail: string }) => u.EMail).join(";") : "";
+          const onBehalfEmails = item.onBehalf
+            ? item.onBehalf.map((u: any) => this.resolveEmail(u)).filter(Boolean).join(";")
+            : "";
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const secretaryEmails = item.Secretary
+            ? item.Secretary.map((u: any) => this.resolveEmail(u)).filter(Boolean).join(";")
+            : "";
           return {
             Id: item.Id,
             Title: item.Title,
             Approver: {
-              // For Official field: Id: item.Official.Id, Title: item.Official.Title, EMail: item.Official.EMail
               Id: item.Official.Id,
               Title: item.Official.Title,
-              EMail: item.Official.EMail
+              EMail: this.resolveEmail(item.Official),
             },
             AuthorizedApprovers: onBehalfEmails,
-            Secretaries: secretaryEmails
+            Secretaries: secretaryEmails,
           };
         });
     } catch (err) {
