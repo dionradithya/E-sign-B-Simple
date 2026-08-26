@@ -172,10 +172,7 @@ export class WhitelistService {
                         EmailId: userId,
                         PhoneNumber: mobilePhone,
                         BadgeNumber: badgeNumber,
-                        Status:
-                            mobilePhone === "Not Found"
-                                ? "Inactive"
-                                : "Active",
+                        Status: "Inactive",
                     });
 
                 console.log(

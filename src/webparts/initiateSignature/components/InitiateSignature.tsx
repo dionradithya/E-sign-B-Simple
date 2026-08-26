@@ -29,7 +29,7 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
     const [approvers, setApprovers] = useState<IApprover[]>([]);
     const [approvalMap, setApprovalMap] = useState<IApprovalMapItem[]>([]);
     const [placeholders, setPlaceholders] = useState<ISignaturePlaceholder[]>([]);
-    const [placementMode, setPlacementMode] = useState<'current' | 'all'>('current');
+    const [placementMode, setPlacementMode] = useState<'current' | 'all' | 'range'>('current');
     const [numPages, setNumPages] = useState<number>(0);
     const [isSaving, setIsSaving] = useState<boolean>(false);
     const [validationTriggered, setValidationTriggered] = useState<boolean>(false);
@@ -144,32 +144,6 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
         console.log("NUMPAGES STATE:", numPages);
     }, [numPages]);
 
-    // const handleSignatureDrop = (page: number, x: number, y: number, approverId: number, type: 'initial' | 'signature', checklistName: boolean, checklistDate: boolean, checklistBadge: boolean, widthPercent?: number, heightPercent?: number): void => {
-    //     const approver = approvers.find(
-    //         a => a.id === approverId
-    //     );
-
-    //     console.log(
-    //         "PLACEMENT MODE:",
-    //         approver?.placementMode
-    //     );
-
-    //     const newPlaceholder: ISignaturePlaceholder = {
-    //         id: Date.now().toString() + Math.random().toString(),
-    //         page,
-    //         x, // Now receiving percentage
-    //         y, // Now receiving percentage
-    //         approverId,
-    //         checklistName,
-    //         checklistDate,
-    //         checklistBadge,
-    //         type,
-    //         width: widthPercent || 20, // Default to 20% if undefined, though it should be defined
-    //         height: heightPercent || 15 // Default to 15% if undefined
-    //     };
-    //     setPlaceholders([...placeholders, newPlaceholder]);
-    // };
-
         const handleSignatureDrop = (
             page: number,
             x: number,
@@ -190,12 +164,78 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
             // ALL PAGES
             if (approver?.placementMode === 'all') {
 
+            const groupId =
+                `${Date.now()}-${approverId}-${type}`;
+
+            const newPlaceholders: ISignaturePlaceholder[] = [];
+
+            for (let p = 1; p <= numPages; p++) {
+
+                newPlaceholders.push({
+                    id: `${Date.now()}-${p}-${Math.random()}`,
+                    groupId: groupId,
+                    page: p,
+                    x,
+                    y,
+                    approverId,
+                    checklistName,
+                    checklistDate,
+                    checklistBadge,
+                    type,
+                    width: widthPercent || 20,
+                    height: heightPercent || 15
+                });
+            }
+
+            setPlaceholders(prev => [
+                ...prev,
+                ...newPlaceholders
+            ]);
+
+            return;
+        }
+
+            // PAGE RANGE
+            if (approver?.placementMode === 'range') {
+
+                const fromPage =
+                    approver.rangeFromPage || 1;
+
+                const toPage =
+                    approver.rangeToPage || 1;
+
+                if (fromPage > toPage) {
+
+                    alert(
+                        'From Page cannot be greater than To Page'
+                    );
+
+                    return;
+                }
+
+                if (toPage > numPages) {
+
+                    alert(
+                        `This PDF only has ${numPages} pages`
+                    );
+
+                    return;
+                }
+
+                const groupId =
+                    `${Date.now()}-${approverId}-${type}`;
+
                 const newPlaceholders: ISignaturePlaceholder[] = [];
 
-                for (let p = 1; p <= numPages; p++) {
+                for (
+                    let p = fromPage;
+                    p <= toPage;
+                    p++
+                ) {
 
                     newPlaceholders.push({
                         id: `${Date.now()}-${p}-${Math.random()}`,
+                        groupId: groupId,
                         page: p,
                         x,
                         y,
@@ -209,8 +249,67 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                     });
                 }
 
-                setPlaceholders([
-                    ...placeholders,
+                setPlaceholders(prev => [
+                    ...prev,
+                    ...newPlaceholders
+                ]);
+
+                return;
+            }
+
+            // SELECTED PAGES
+            if (approver?.placementMode === 'selected') {
+
+                const pages =
+                    approver.selectedPages || [];
+
+                if (pages.length === 0) {
+
+                    alert(
+                        'Please select at least one page'
+                    );
+
+                    return;
+                }
+
+                const groupId =
+                    `${Date.now()}-${approverId}-${type}`;
+
+                const newPlaceholders: ISignaturePlaceholder[] = [];
+
+                pages.forEach(p => {
+
+                    newPlaceholders.push({
+
+                        id:
+                            `${Date.now()}-${p}-${Math.random()}`,
+
+                        groupId,
+
+                        page: p,
+
+                        x,
+                        y,
+
+                        approverId,
+
+                        checklistName,
+                        checklistDate,
+                        checklistBadge,
+
+                        type,
+
+                        width:
+                            widthPercent || 20,
+
+                        height:
+                            heightPercent || 15
+                    });
+
+                });
+
+                setPlaceholders(prev => [
+                    ...prev,
                     ...newPlaceholders
                 ]);
 
@@ -238,12 +337,69 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
             ]);
         };
 
-    const updatePlaceholder = (id: string, updates: Partial<ISignaturePlaceholder>): void => {
-        setPlaceholders(placeholders.map(p => p.id === id ? { ...p, ...updates } : p));
-    };
+        const updatePlaceholder = (
+            id: string,
+            updates: Partial<ISignaturePlaceholder>
+        ): void => {
+
+            setPlaceholders(prev => {
+
+                const target = prev.find(p => p.id === id);
+
+                if (!target) {
+                    return prev;
+                }
+
+                if (target.groupId) {
+
+                    return prev.map(p => {
+
+                        if (p.groupId !== target.groupId) {
+                            return p;
+                        }
+
+                        return {
+                            ...p,
+                            x: updates.x !== undefined
+                                ? updates.x
+                                : p.x,
+                            y: updates.y !== undefined
+                                ? updates.y
+                                : p.y,
+                            width: updates.width !== undefined
+                                ? updates.width
+                                : p.width,
+                            height: updates.height !== undefined
+                                ? updates.height
+                                : p.height
+                        };
+                    });
+                }
+
+                return prev.map(p =>
+                    p.id === id
+                        ? {
+                            ...p,
+                            ...updates
+                        }
+                        : p
+                );
+            });
+        };
 
     const removePlaceholder = (id: string): void => {
         setPlaceholders(placeholders.filter(p => p.id !== id));
+    };
+
+    const clearApproverPlaceholders = (
+        approverId: number
+    ): void => {
+
+        setPlaceholders(
+            placeholders.filter(
+                p => p.approverId !== approverId
+            )
+        );
     };
 
     const handleRemoveApprover = (id: number): void => {
@@ -541,6 +697,8 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                         onEmbedQrCodeChange={setEmbedQrCode}
                         placementMode={placementMode}
                         onPlacementModeChange={setPlacementMode}
+                        onClearApproverPlaceholders={clearApproverPlaceholders}
+                        numPages={numPages}
                     />
                 </div>
 

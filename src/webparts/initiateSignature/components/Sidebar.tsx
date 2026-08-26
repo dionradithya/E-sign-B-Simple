@@ -17,7 +17,10 @@ export interface IApprover {
     includeName: boolean;
     includeDate: boolean;
     includeBadge: boolean;
-    placementMode: 'current' | 'all';
+    placementMode: 'current' | 'all' | 'range' | 'selected';
+    rangeFromPage?: number;
+    rangeToPage?: number;
+    selectedPages?: number[];
 }
 
 interface ISidebarProps {
@@ -35,8 +38,10 @@ interface ISidebarProps {
     onReviewerCanDownloadChange: (checked: boolean) => void;
     embedQrCode: boolean;
     onEmbedQrCodeChange: (checked: boolean) => void;
-    placementMode: 'current' | 'all';
-    onPlacementModeChange: (mode: 'current' | 'all') => void;
+    placementMode: 'current' | 'all' | 'range' | 'selected';
+    onPlacementModeChange: (mode: 'current' | 'all' | 'range') => void;
+    onClearApproverPlaceholders: (approverId: number) => void;
+    numPages: number;
 }
 
 const Sidebar: React.FC<ISidebarProps> = ({
@@ -56,6 +61,8 @@ const Sidebar: React.FC<ISidebarProps> = ({
     onEmbedQrCodeChange,
     placementMode,
     onPlacementModeChange,
+    onClearApproverPlaceholders,
+    numPages,
 }): React.ReactElement => {
 
     // Temporary store for selected people picker items
@@ -126,7 +133,10 @@ const Sidebar: React.FC<ISidebarProps> = ({
                     includeName: false,
                     includeDate: false,
                     includeBadge: false,
-                    placementMode: 'current'
+                    placementMode: 'current',
+                    rangeFromPage: 1,
+                    rangeToPage: 1,
+                    selectedPages: []
                 };
                 newApprovers.push(newApprover);
             }
@@ -185,10 +195,10 @@ const Sidebar: React.FC<ISidebarProps> = ({
         onApproversChange(updated);
     };
 
-    const handlePlacementModeChange = (
-        id: number,
-        mode: 'current' | 'all'
-    ): void => {
+        const handlePlacementModeChange = (
+            id: number,
+            mode: 'current' | 'all' | 'range' | 'selected'
+        ): void => {
 
         const updated = approvers.map(a =>
             a.id === id
@@ -246,36 +256,6 @@ const Sidebar: React.FC<ISidebarProps> = ({
                     />
                 </div>
             </div>
-
-            {/* <div className="mb-4">
-                <Label>Placement Mode</Label>
-
-                <div className="form-check">
-                    <input
-                        className="form-check-input"
-                        type="radio"
-                        name="placementMode"
-                        checked={placementMode === 'current'}
-                        onChange={() => onPlacementModeChange('current')}
-                    />
-                    <label className="form-check-label">
-                        Current Page
-                    </label>
-                </div>
-
-                <div className="form-check">
-                    <input
-                        className="form-check-input"
-                        type="radio"
-                        name="placementMode"
-                        checked={placementMode === 'all'}
-                        onChange={() => onPlacementModeChange('all')}
-                    />
-                    <label className="form-check-label">
-                        All Pages
-                    </label>
-                </div>
-            </div> */}
 
             <div className="mb-4">
                 <Label>2. Manage Approvers & Fields</Label>
@@ -401,36 +381,239 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                                 All Pages
                                             </label>
                                         </div>
-                                    </div>
+
+                                        <div className="form-check">
+                                            <input
+                                                className="form-check-input"
+                                                type="radio"
+                                                name={`placement-${approver.id}`}
+                                                checked={approver.placementMode === 'range'}
+                                                onChange={() =>
+                                                    handlePlacementModeChange(
+                                                        approver.id,
+                                                        'range'
+                                                    )
+                                                }
+                                            />
+                                            <label className="form-check-label">
+                                                Page Range
+                                            </label>
+                                        </div>
+
+                                        <div className="form-check">
+                                            <input
+                                                className="form-check-input"
+                                                type="radio"
+                                                name={`placement-${approver.id}`}
+                                                checked={
+                                                    approver.placementMode ===
+                                                    'selected'
+                                                }
+                                                onChange={() =>
+                                                    handlePlacementModeChange(
+                                                        approver.id,
+                                                        'selected'
+                                                    )
+                                                }
+                                            />
+                                            <label className="form-check-label">
+                                                Selected Pages
+                                            </label>
+                                        </div>
+
+                                        {
+                                            approver.placementMode === 'selected' && (
+                                                <div
+                                                    className="mt-2 border rounded p-2"
+                                                    style={{
+                                                        maxHeight: '150px',
+                                                        overflowY: 'auto'
+                                                    }}
+                                                >
+                                                    {
+                                                        Array.from(
+                                                            { length: numPages },
+                                                            (_, index) => {
+
+                                                                const page =
+                                                                    index + 1;
+
+                                                                return (
+                                                                    <div
+                                                                        key={page}
+                                                                        className="form-check"
+                                                                    >
+                                                                        <input
+                                                                            className="form-check-input"
+                                                                            type="checkbox"
+
+                                                                            checked={
+                                                                                approver.selectedPages?.includes(page) || false
+                                                                            }
+
+                                                                            onChange={(e) => {
+
+                                                                                const updated = approvers.map(a => {
+
+                                                                                    if (a.id !== approver.id) {
+                                                                                        return a;
+                                                                                    }
+
+                                                                                    const currentPages =
+                                                                                        a.selectedPages || [];
+
+                                                                                    return {
+                                                                                        ...a,
+
+                                                                                        selectedPages:
+                                                                                            e.target.checked
+                                                                                                ? [
+                                                                                                    ...currentPages,
+                                                                                                    page
+                                                                                                ]
+                                                                                                : currentPages.filter(
+                                                                                                    p => p !== page
+                                                                                                )
+                                                                                    };
+                                                                                });
+
+                                                                                onApproversChange(updated);
+                                                                            }}
+                                                                        />
+
+                                                                        <label
+                                                                            className="form-check-label"
+                                                                        >
+                                                                            Page {page}
+                                                                        </label>
+                                                                    </div>
+                                                                );
+                                                            }
+                                                        )
+                                                    }
+                                                    <div className="small text-primary mt-2">
+                                                        Selected:
+                                                        {
+                                                            approver.selectedPages?.join(', ')
+                                                            || ' None'
+                                                        }
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+                                        {
+                                            approver.placementMode === 'range' && (
+                                                <div className="mt-2">
+
+                                                    <label className="form-label">
+                                                        From
+                                                    </label>
+
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        value={approver.rangeFromPage || 1}
+                                                        className="form-control mb-2"
+                                                        onChange={(e) => {
+
+                                                            const updated =
+                                                                approvers.map(a =>
+                                                                    a.id === approver.id
+                                                                        ? {
+                                                                            ...a,
+                                                                            rangeFromPage:
+                                                                                Number(
+                                                                                    e.target.value
+                                                                                )
+                                                                        }
+                                                                        : a
+                                                                );
+
+                                                            onApproversChange(updated);
+                                                        }}
+                                                    />
+
+                                                    <label className="form-label">
+                                                        To
+                                                    </label>
+
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        value={approver.rangeToPage || 1}
+                                                        className="form-control"
+                                                        onChange={(e) => {
+
+                                                            const updated =
+                                                                approvers.map(a =>
+                                                                    a.id === approver.id
+                                                                        ? {
+                                                                            ...a,
+                                                                            rangeToPage:
+                                                                                Number(
+                                                                                    e.target.value
+                                                                                )
+                                                                        }
+                                                                        : a
+                                                                );
+
+                                                            onApproversChange(updated);
+                                                        }}
+                                                    />
+
+                                                </div>
+                                            )
+                                        }
+                                                                            </div>
                                 </div>
 
                                 {/* Drag Buttons - tap on mobile, drag on desktop */}
-                                <div className="d-flex gap-2">
+                                <div className="d-flex flex-column gap-2">
+                                    <div className="d-flex gap-2">
+                                        <button
+                                            draggable
+                                            onDragStart={(e) => onDragStart(e, approver, 'initial')}
+                                            onTouchStart={() => handleTouchSelect(approver, 'initial')}
+                                            type="button"
+                                            className="btn btn-sm btn-outline-primary flex-grow-1"
+                                            style={{
+                                                touchAction: 'manipulation',
+                                                userSelect: 'none',
+                                                WebkitUserSelect: 'none'
+                                            }}
+                                        >
+                                            Initial
+                                        </button>
+
+                                        <button
+                                            draggable
+                                            onDragStart={(e) => onDragStart(e, approver, 'signature')}
+                                            onTouchStart={() => handleTouchSelect(approver, 'signature')}
+                                            type="button"
+                                            className="btn btn-sm btn-outline-success flex-grow-1"
+                                            style={{
+                                                touchAction: 'manipulation',
+                                                userSelect: 'none',
+                                                WebkitUserSelect: 'none'
+                                            }}
+                                        >
+                                            Signature
+                                        </button>
+                                    </div>
+
                                     <button
-                                        draggable
-                                        onDragStart={(e) => onDragStart(e, approver, 'initial')}
-                                        onTouchStart={() => handleTouchSelect(approver, 'initial')}
                                         type="button"
-                                        className="btn btn-sm btn-outline-primary flex-grow-1"
-                                        style={{ touchAction: 'manipulation', userSelect: 'none', WebkitUserSelect: 'none' }}
+                                        className="btn btn-sm btn-outline-danger w-100"
+                                        onClick={() => onClearApproverPlaceholders(approver.id)}
                                     >
-                                        Initial
-                                    </button>
-                                    <button
-                                        draggable
-                                        onDragStart={(e) => onDragStart(e, approver, 'signature')}
-                                        onTouchStart={() => handleTouchSelect(approver, 'signature')}
-                                        type="button"
-                                        className="btn btn-sm btn-outline-success flex-grow-1"
-                                        style={{ touchAction: 'manipulation', userSelect: 'none', WebkitUserSelect: 'none' }}
-                                    >
-                                        Signature
+                                        Clear
                                     </button>
                                 </div>
                             </div>
                         );
                     })}
-                    
+
                     {approvers.length === 0 && <div className="text-muted small fst-italic text-center py-3">No approvers added yet. Add someone above!</div>}
                 </Stack>
             </div>

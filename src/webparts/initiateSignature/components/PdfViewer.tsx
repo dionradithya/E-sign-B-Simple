@@ -24,6 +24,7 @@ export interface ISignaturePlaceholder {
   type: 'initial' | 'signature';
   width: number;
   height: number;
+  groupId?: string;
 }
 
 interface IPdfViewerProps {
@@ -387,6 +388,23 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
               style={{ width: pdfWrapperWidth, cursor: isDragging ? 'crosshair' : 'default' }}
             >
               <Page pageNumber={pageNum} renderTextLayer={false} renderAnnotationLayer={false} width={pdfWrapperWidth} />
+
+            <div
+                style={{
+                    position: 'absolute',
+                    bottom: '10px',
+                    left: '10px',
+                    backgroundColor: 'rgba(255,255,255,0.9)',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    padding: '2px 8px',
+                    fontSize: '12px',
+                    color: '#666',
+                    zIndex: 9999
+                }}
+            >
+                {pageNum} / {numPages}
+            </div>
 
               {/* Render Placeholders */}
               {pagePlaceholders.map(p => {
