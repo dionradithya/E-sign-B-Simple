@@ -337,6 +337,21 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
             ]);
         };
 
+            const placeAtCenter = (
+        approver: IApprover,
+        type: 'initial' | 'signature',
+    ): void => {
+        handleSignatureDrop(
+            1, 50, 50,
+            approver.id,
+            type,
+            approver.includeName,
+            approver.includeDate,
+            approver.includeBadge,
+            25,    // ← width (%): perlebar
+            10,    // ← height (%): perpendek → jadi persegi panjang mendatar
+        );
+    };
         const updatePlaceholder = (
             id: string,
             updates: Partial<ISignaturePlaceholder>
@@ -699,6 +714,7 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                         onPlacementModeChange={setPlacementMode}
                         onClearApproverPlaceholders={clearApproverPlaceholders}
                         numPages={numPages}
+                        onPlaceAtCenter={placeAtCenter}
                     />
                 </div>
 

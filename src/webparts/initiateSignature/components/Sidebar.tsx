@@ -42,6 +42,7 @@ interface ISidebarProps {
     onPlacementModeChange: (mode: 'current' | 'all' | 'range') => void;
     onClearApproverPlaceholders: (approverId: number) => void;
     numPages: number;
+    onPlaceAtCenter: (approver: IApprover, type: 'initial' | 'signature') => void;
 }
 
 const Sidebar: React.FC<ISidebarProps> = ({
@@ -63,6 +64,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
     onPlacementModeChange,
     onClearApproverPlaceholders,
     numPages,
+    onPlaceAtCenter,
 }): React.ReactElement => {
 
     // Temporary store for selected people picker items
@@ -572,31 +574,19 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                 <div className="d-flex flex-column gap-2">
                                     <div className="d-flex gap-2">
                                         <button
-                                            draggable
-                                            onDragStart={(e) => onDragStart(e, approver, 'initial')}
-                                            onTouchStart={() => handleTouchSelect(approver, 'initial')}
+                                            onClick={() => onPlaceAtCenter(approver, 'initial')}
                                             type="button"
                                             className="btn btn-sm btn-outline-primary flex-grow-1"
-                                            style={{
-                                                touchAction: 'manipulation',
-                                                userSelect: 'none',
-                                                WebkitUserSelect: 'none'
-                                            }}
+                                            style={{ touchAction: 'manipulation' }}
                                         >
                                             Initial
                                         </button>
 
                                         <button
-                                            draggable
-                                            onDragStart={(e) => onDragStart(e, approver, 'signature')}
-                                            onTouchStart={() => handleTouchSelect(approver, 'signature')}
+                                            onClick={() => onPlaceAtCenter(approver, 'signature')}
                                             type="button"
                                             className="btn btn-sm btn-outline-success flex-grow-1"
-                                            style={{
-                                                touchAction: 'manipulation',
-                                                userSelect: 'none',
-                                                WebkitUserSelect: 'none'
-                                            }}
+                                            style={{ touchAction: 'manipulation' }}
                                         >
                                             Signature
                                         </button>
