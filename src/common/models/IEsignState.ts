@@ -105,6 +105,7 @@ export interface IInitiateEsignFormState {
     isBlockingDialogOpen?: boolean;
     blockingDialogTitle?: string;
     blockingDialogMessage?: string;
+    blockingDialogDetails?: { label: string; value: string }[];
 
     isSaving: boolean;
     

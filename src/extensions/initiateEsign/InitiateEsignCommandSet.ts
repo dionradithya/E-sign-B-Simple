@@ -13,7 +13,7 @@ import "@pnp/sp/lists";
 import "@pnp/sp/items";
 import ConfirmationDialog from "./components/ConfirmationDialog";
 import SignatureLogDialog from "./components/SignatureLogDialog";
-import { TENANT_DOMAIN, SITES_ESIGN, LIST_PROCESS, LIST_ACTIVE_SITES, PAGE_INITIATE_ESIGN } from "../../common/constants";
+import { TENANT_DOMAIN, SITES_ESIGN, LIST_PROCESS, LIST_TASKS, LIST_ACTIVE_SITES, PAGE_INITIATE_ESIGN } from "../../common/constants";
 
 interface IActiveSiteConfig {
   Title: string; // Site relative URL/path
@@ -139,7 +139,7 @@ export default class InitiateEsignCommandSet extends BaseListViewCommandSet<IIni
                     // Update to Canceled
                     sp.web.lists.getByTitle(LIST_PROCESS).items.getById(item.Id).update({
                       Status: "Canceled"
-                    }).then(() => {
+                    }).then(() => this._cancelPendingTasks(sp, item.Id)).then(() => {
                       Dialog.alert("Requests successfully canceled.").then(() => {
                         window.location.reload();
                       }).catch(console.error);
@@ -281,6 +281,29 @@ export default class InitiateEsignCommandSet extends BaseListViewCommandSet<IIni
       if (compareTwoCommand) compareTwoCommand.visible = false;
       if (compareThreeCommand) compareThreeCommand.visible = false;
       this.raiseOnChange();
+    }
+  }
+
+  /**
+   * Marks all Pending approver tasks of a process as Canceled so they no longer
+   * appear as work to do. Failures are logged only: the approval form also checks
+   * the process status, so approvers stay blocked even if this update fails.
+   */
+  private async _cancelPendingTasks(sp: SPFI, processId: number): Promise<void> {
+    try {
+      const tasks = await sp.web.lists.getByTitle(LIST_TASKS).items
+        .select("Id", "ProcessID/Id")
+        .expand("ProcessID")
+        .filter(`ProcessID/Id eq ${processId} and Status eq 'Pending'`)();
+
+      await Promise.all(tasks.map((task: { Id: number }) =>
+        sp.web.lists.getByTitle(LIST_TASKS).items.getById(task.Id).update({
+          Status: "Canceled",
+          Comments: "Canceled by requestor"
+        })
+      ));
+    } catch (e) {
+      console.warn(LOG_SOURCE, "Failed to cancel pending tasks", e);
     }
   }
 

@@ -211,7 +211,8 @@ export default class InitiateEsignForm extends React.Component<IInitiateEsignFor
                     loading: false,
                     isBlockingDialogOpen: true,
                     blockingDialogTitle: error.title,
-                    blockingDialogMessage: error.message
+                    blockingDialogMessage: error.message,
+                    blockingDialogDetails: error.details
                 });
             } else {
                 let errorMessage = error.message || "Failed to load document.";
@@ -577,6 +578,29 @@ export default class InitiateEsignForm extends React.Component<IInitiateEsignFor
         this.setState({ isApproveDialogOpen: false, approveComment: '' });
     };
 
+    /**
+     * Re-checks the process status right before saving. If the requestor canceled
+     * the request while the form was open, shows the blocking dialog and returns true.
+     */
+    private _blockIfProcessCanceled = async (sp: SPFI, interruptedAction: 'approval' | 'rejection'): Promise<boolean> => {
+        if (!this.state.processId) return false;
+
+        const cancelInfo = await EsignDataService.getProcessCancelInfo(sp, this.state.processId);
+        if (!cancelInfo) return false;
+
+        const dialog = EsignDataService.getCanceledDialogContent(cancelInfo, interruptedAction);
+        this.setState({
+            isSaving: false,
+            isApproveDialogOpen: false,
+            isRejectDialogOpen: false,
+            isBlockingDialogOpen: true,
+            blockingDialogTitle: dialog.title,
+            blockingDialogMessage: dialog.message,
+            blockingDialogDetails: dialog.details
+        });
+        return true;
+    };
+
     private _confirmApprove = async (): Promise<void> => {
 
         if (this.state.isSecretaryOnly) {
@@ -590,6 +614,9 @@ export default class InitiateEsignForm extends React.Component<IInitiateEsignFor
             const itemId = this.props.context.itemId;
 
             if (!itemId) throw new Error("Item ID invalid");
+
+            // 0. Stop if the request was canceled while the form was open
+            if (await this._blockIfProcessCanceled(sp, 'approval')) return;
 
             // 1. Burn Annotations (including signatures and initials for approval)
             const hash = await this._burnAnnotations(true);
@@ -658,6 +685,9 @@ export default class InitiateEsignForm extends React.Component<IInitiateEsignFor
             const itemId = this.props.context.itemId;
 
             if (!itemId) throw new Error("Item ID invalid");
+
+            // Stop if the request was canceled while the form was open
+            if (await this._blockIfProcessCanceled(sp, 'rejection')) return;
 
             // CHECK IF ANNOTATIONS EXIST AND BURN THEM (but NOT signatures/initials for rejection)
             const hash = (this.state.paths.length > 0 || this.state.texts.length > 0) ? await this._burnAnnotations(false) : undefined;
@@ -1668,6 +1698,16 @@ export default class InitiateEsignForm extends React.Component<IInitiateEsignFor
                             styles: { main: { maxWidth: 450 } }
                         }}
                     >
+                        {this.state.blockingDialogDetails && this.state.blockingDialogDetails.length > 0 && (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 14px', fontSize: 13, backgroundColor: '#f3f2f1', padding: '10px 12px', borderRadius: 2 }}>
+                                {this.state.blockingDialogDetails.map(d => (
+                                    <React.Fragment key={d.label}>
+                                        <span style={{ color: '#605e5c' }}>{d.label}</span>
+                                        <span style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{d.value}</span>
+                                    </React.Fragment>
+                                ))}
+                            </div>
+                        )}
                         <DialogFooter>
                             <PrimaryButton
                                 text="OK"

@@ -39,6 +39,36 @@ export interface IAccessValidationResult {
 }
 
 /**
+ * Info about a canceled process, used to explain the cancellation to the approver
+ */
+export interface IProcessCancelInfo {
+    documentName: string;
+    canceledBy: string;
+    canceledOn: string;
+    isSystemCancel: boolean;
+    reason?: string;
+}
+
+/**
+ * Label/value row shown under the blocking dialog message
+ */
+export interface IDialogDetail {
+    label: string;
+    value: string;
+}
+
+/**
+ * Blocking dialog content for a canceled request
+ */
+export interface ICanceledDialogContent {
+    title: string;
+    message: string;
+    details: IDialogDetail[];
+}
+
+const SYSTEM_CANCEL_PREFIX = "System Canceled:";
+
+/**
  * Service for handling eSign document data operations
  */
 export class EsignDataService {
@@ -90,8 +120,22 @@ export class EsignDataService {
         // 3. Validate Access
         const currentUser = await sp.web.currentUser();
         const validationResult = this.validateTaskAccess(item, currentUser);
+        const isTaskCanceled = item.Status === 'Canceled';
 
-        
+        // Assignment errors (and non-cancel status errors) take precedence
+        if (!validationResult.isValid && validationResult.error && !isTaskCanceled) {
+            throw this.createDialogError(validationResult.error.title, validationResult.error.message);
+        }
+
+        // 3b. Block if the parent process was canceled, even when the task is still Pending
+        if (item.ProcessID && item.ProcessID.Id) {
+            const cancelInfo = await this.getProcessCancelInfo(sp, item.ProcessID.Id);
+            if (cancelInfo) {
+                const dialog = this.getCanceledDialogContent(cancelInfo);
+                throw this.createDialogError(dialog.title, dialog.message, dialog.details);
+            }
+        }
+
         let isAssigned = false;
         let isSecretary = false;
 
@@ -116,11 +160,7 @@ export class EsignDataService {
         const isSecretaryOnly = isSecretary && !isAssigned;
 
         if (!validationResult.isValid && validationResult.error) {
-            const error = new Error(validationResult.error.message) as Error & {
-                title?: string
-            };
-            error.title = validationResult.error.title;
-            throw error;
+            throw this.createDialogError(validationResult.error.title, validationResult.error.message);
         }
 
         // 4. Check ProcessID exists
@@ -242,6 +282,77 @@ export class EsignDataService {
         }
 
         return { isValid: true };
+    }
+
+    /**
+     * Checks whether a process has been canceled
+     *
+     * @param sp - Initialized SPFI object (eSign site)
+     * @param processId - ID of the item in the Process list
+     * @returns Cancel info if the process is canceled, otherwise undefined
+     */
+    public static async getProcessCancelInfo(sp: SPFI, processId: number): Promise<IProcessCancelInfo | undefined> {
+        const process = await sp.web.lists.getByTitle(LIST_PROCESS).items
+            .getById(processId)
+            .select("Status", "Modified", "Notes", "FileRef0", "Requestor/Title")
+            .expand("Requestor")();
+
+        if (process.Status !== 'Canceled') {
+            return undefined;
+        }
+
+        const notes: string = process.Notes || "";
+        const isSystemCancel = notes.indexOf(SYSTEM_CANCEL_PREFIX) === 0;
+
+        return {
+            documentName: process.FileRef0 ? process.FileRef0.split('/').pop() : "Document",
+            canceledBy: isSystemCancel ? "System" : (process.Requestor ? process.Requestor.Title : "Requestor"),
+            canceledOn: new Date(process.Modified).toLocaleString('en-GB', {
+                day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+            }),
+            isSystemCancel: isSystemCancel,
+            reason: isSystemCancel ? notes.substring(SYSTEM_CANCEL_PREFIX.length).trim() : undefined
+        };
+    }
+
+    /**
+     * Builds the blocking dialog content for a canceled request
+     *
+     * @param info - Cancel info from getProcessCancelInfo
+     * @param interruptedAction - Set when the cancel happened while the approver was submitting
+     */
+    public static getCanceledDialogContent(
+        info: IProcessCancelInfo,
+        interruptedAction?: 'approval' | 'rejection'
+    ): ICanceledDialogContent {
+        const canceledByText = info.isSystemCancel ? "by the system" : "by the requestor";
+        const message = interruptedAction
+            ? `This request was canceled ${canceledByText} while you were reviewing it. Your ${interruptedAction} was not saved.`
+            : `This request has been canceled ${canceledByText}. You no longer need to review or sign this document.`;
+
+        const details: IDialogDetail[] = [
+            { label: "Document", value: info.documentName },
+            { label: "Canceled by", value: info.canceledBy },
+            { label: "Canceled on", value: info.canceledOn }
+        ];
+        if (info.reason) {
+            details.push({ label: "Reason", value: info.reason });
+        }
+
+        return { title: "Request Canceled", message, details };
+    }
+
+    /**
+     * Creates an error that the form shows in its blocking dialog
+     */
+    private static createDialogError(title: string, message: string, details?: IDialogDetail[]): Error {
+        const error = new Error(message) as Error & {
+            title?: string;
+            details?: IDialogDetail[];
+        };
+        error.title = title;
+        error.details = details;
+        return error;
     }
 
     /**
