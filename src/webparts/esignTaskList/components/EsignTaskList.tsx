@@ -17,8 +17,70 @@ import {
     Stack,
     MessageBar,
     MessageBarType,
-    PrimaryButton
+    PrimaryButton,
+    DefaultButton
 } from '@fluentui/react';
+
+const PAGE_SIZE = 15;
+
+/**
+ * Page numbers to show in the pager. Collapses long ranges with ellipses,
+ * e.g. [1, '...', 4, 5, 6, '...', 10]
+ */
+const getPageNumbers = (currentPage: number, totalPages: number): (number | '...')[] => {
+    if (totalPages <= 7) {
+        return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    const pages: (number | '...')[] = [1];
+    const start = Math.max(2, currentPage - 1);
+    const end = Math.min(totalPages - 1, currentPage + 1);
+    if (start > 2) pages.push('...');
+    for (let p = start; p <= end; p++) pages.push(p);
+    if (end < totalPages - 1) pages.push('...');
+    pages.push(totalPages);
+    return pages;
+};
+
+interface IPagerProps {
+    page: number;
+    totalItems: number;
+    itemLabel: string;
+    onPageChange: (page: number) => void;
+}
+
+/**
+ * Pager shown under a table. Renders nothing when everything fits on one page.
+ */
+const Pager: React.FC<IPagerProps> = ({ page, totalItems, itemLabel, onPageChange }) => {
+    if (totalItems <= PAGE_SIZE) return null;
+
+    const totalPages = Math.ceil(totalItems / PAGE_SIZE);
+    const start = (page - 1) * PAGE_SIZE;
+    const end = Math.min(start + PAGE_SIZE, totalItems);
+    const buttonStyles = { root: { height: 28, minWidth: 32, padding: 0, fontSize: '12px' } };
+    const navButtonStyles = { root: { height: 28, minWidth: 0, padding: '0 10px', fontSize: '12px' } };
+
+    return (
+        <Stack horizontal horizontalAlign="space-between" verticalAlign="center" wrap tokens={{ childrenGap: 10 }} style={{ marginTop: 12 }}>
+            <Text variant="small" style={{ color: '#605e5c' }}>
+                Showing {start + 1}–{end} of {totalItems} {itemLabel}
+            </Text>
+            <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 4 }}>
+                <DefaultButton text="Previous" disabled={page === 1} onClick={() => onPageChange(page - 1)} styles={navButtonStyles} />
+                {getPageNumbers(page, totalPages).map((p, i) =>
+                    p === '...' ? (
+                        <span key={`gap-${i}`} style={{ padding: '0 4px', color: '#605e5c' }}>…</span>
+                    ) : p === page ? (
+                        <PrimaryButton key={p} text={String(p)} aria-current="page" styles={buttonStyles} />
+                    ) : (
+                        <DefaultButton key={p} text={String(p)} onClick={() => onPageChange(p)} styles={buttonStyles} />
+                    )
+                )}
+                <DefaultButton text="Next" disabled={page === totalPages} onClick={() => onPageChange(page + 1)} styles={navButtonStyles} />
+            </Stack>
+        </Stack>
+    );
+};
 
 interface IProcessingRequest {
     Id: number;
@@ -42,6 +104,13 @@ const EsignTaskList: React.FC<IEsignTaskListProps> = (props) => {
     const [processingRequests, setProcessingRequests] = useState<IProcessingRequest[]>([]);
     const [loading, setLoading] = useState<boolean>(true);
     const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+    const [taskPage, setTaskPage] = useState<number>(1);
+    const [requestPage, setRequestPage] = useState<number>(1);
+
+    const taskPageStart = (taskPage - 1) * PAGE_SIZE;
+    const pagedTasks = tasks.slice(taskPageStart, taskPageStart + PAGE_SIZE);
+    const requestPageStart = (requestPage - 1) * PAGE_SIZE;
+    const pagedRequests = processingRequests.slice(requestPageStart, requestPageStart + PAGE_SIZE);
 
     useEffect(() => {
         const fetchData = async (): Promise<void> => {
@@ -168,8 +237,9 @@ const EsignTaskList: React.FC<IEsignTaskListProps> = (props) => {
             fieldName: 'no',
             minWidth: 30,
             maxWidth: 30,
+            // Continue numbering across pages
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onRender: (item: any, index?: number) => <span>{(index || 0) + 1}</span>
+            onRender: (item: any, index?: number) => <span>{requestPageStart + (index || 0) + 1}</span>
         },
         {
             key: 'processCode',
@@ -242,8 +312,9 @@ const EsignTaskList: React.FC<IEsignTaskListProps> = (props) => {
             fieldName: 'no',
             minWidth: 30,
             maxWidth: 30,
+            // Continue numbering across pages
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onRender: (item: any, index?: number) => <span>{(index || 0) + 1}</span>
+            onRender: (item: any, index?: number) => <span>{taskPageStart + (index || 0) + 1}</span>
         },
         {
             key: 'processCode',
@@ -342,14 +413,17 @@ const EsignTaskList: React.FC<IEsignTaskListProps> = (props) => {
                                 No active requests found.
                             </MessageBar>
                         ) : (
-                            <div style={{ boxShadow: '0 2px 5px rgba(0,0,0,0.1)', borderRadius: 2, overflow: 'hidden' }}>
-                                <DetailsList
-                                    items={processingRequests}
-                                    columns={requestColumns}
-                                    selectionMode={SelectionMode.none}
-                                    layoutMode={0} // Fixed columns
-                                />
-                            </div>
+                            <>
+                                <div style={{ boxShadow: '0 2px 5px rgba(0,0,0,0.1)', borderRadius: 2, overflow: 'hidden' }}>
+                                    <DetailsList
+                                        items={pagedRequests}
+                                        columns={requestColumns}
+                                        selectionMode={SelectionMode.none}
+                                        layoutMode={0} // Fixed columns
+                                    />
+                                </div>
+                                <Pager page={requestPage} totalItems={processingRequests.length} itemLabel="requests" onPageChange={setRequestPage} />
+                            </>
                         )}
                     </div>
                 )}
@@ -363,14 +437,17 @@ const EsignTaskList: React.FC<IEsignTaskListProps> = (props) => {
                                 No pending tasks found for <strong>{escape(props.userDisplayName)}</strong>.
                             </MessageBar>
                         ) : (
-                            <div style={{ boxShadow: '0 2px 5px rgba(0,0,0,0.1)', borderRadius: 2, overflow: 'hidden' }}>
-                                <DetailsList
-                                    items={tasks}
-                                    columns={columns}
-                                    selectionMode={SelectionMode.none}
-                                    layoutMode={0} // Fixed columns
-                                />
-                            </div>
+                            <>
+                                <div style={{ boxShadow: '0 2px 5px rgba(0,0,0,0.1)', borderRadius: 2, overflow: 'hidden' }}>
+                                    <DetailsList
+                                        items={pagedTasks}
+                                        columns={columns}
+                                        selectionMode={SelectionMode.none}
+                                        layoutMode={0} // Fixed columns
+                                    />
+                                </div>
+                                <Pager page={taskPage} totalItems={tasks.length} itemLabel="tasks" onPageChange={setTaskPage} />
+                            </>
                         )}
                     </div>
                 )}
