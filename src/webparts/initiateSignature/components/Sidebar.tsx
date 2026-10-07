@@ -23,6 +23,15 @@ export interface IApprover {
     selectedPages?: number[];
 }
 
+/**
+ * Small muted helper text used under labels and options
+ */
+const HelpText: React.FC<{ className?: string }> = ({ children, className }) => (
+    <div className={`text-muted ${className || ''}`} style={{ fontSize: 11, lineHeight: 1.4 }}>
+        {children}
+    </div>
+);
+
 interface ISidebarProps {
     context: WebPartContext;
     approvers: IApprover[];
@@ -42,6 +51,7 @@ interface ISidebarProps {
     onPlacementModeChange: (mode: 'current' | 'all' | 'range') => void;
     onClearApproverPlaceholders: (approverId: number) => void;
     numPages: number;
+    visiblePage: number;
     onPlaceAtCenter: (approver: IApprover, type: 'initial' | 'signature') => void;
 }
 
@@ -64,6 +74,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
     onPlacementModeChange,
     onClearApproverPlaceholders,
     numPages,
+    visiblePage,
     onPlaceAtCenter,
 }): React.ReactElement => {
 
@@ -97,6 +108,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
     };
 
     const [addingApprover, setAddingApprover] = React.useState<boolean>(false);
+    const [showGuide, setShowGuide] = React.useState<boolean>(true);
 
     const handleAddApprover = async (): Promise<void> => {
         if (!selectedPickerItems || selectedPickerItems.length === 0) return;
@@ -232,10 +244,36 @@ const Sidebar: React.FC<ISidebarProps> = ({
 
     return (
         <div className="p-3 bg-white border-start h-100" style={{ overflowY: 'auto' }}>
-            <h5 className="mb-3">Workflow Setup</h5>
+            <div className="d-flex justify-content-between align-items-center mb-2">
+                <h5 className="mb-0">Workflow Setup</h5>
+                <button
+                    type="button"
+                    className="btn btn-link btn-sm p-0"
+                    style={{ fontSize: 12 }}
+                    onClick={() => setShowGuide(!showGuide)}
+                    aria-expanded={showGuide}
+                >
+                    {showGuide ? 'Hide guide' : 'Show guide'}
+                </button>
+            </div>
+
+            {showGuide && (
+                <div className="mb-3 p-2 rounded" style={{ backgroundColor: 'rgba(0, 120, 212, 0.06)', border: '1px solid rgba(0, 120, 212, 0.25)', fontSize: 12 }}>
+                    <div className="fw-bold mb-1">How to set up a signing request</div>
+                    <ol className="mb-0 ps-3">
+                        <li>Add the approvers who need to sign, in signing order.</li>
+                        <li>For each approver, choose the details to show and the Placement Mode.</li>
+                        <li>Click <b>Initial</b> or <b>Signature</b> to add a box, then drag it to the right spot on the PDF.</li>
+                        <li>Click <b>Process Workflow</b> to send the request.</li>
+                    </ol>
+                </div>
+            )}
 
             <div className="mb-4">
                 <Label>1. Add Approvers</Label>
+                <HelpText className="mb-2">
+                    Only people registered in the Approval Map can be added. You can select more than one person, then click Add to Workflow.
+                </HelpText>
 
                 <Label>Search Approver</Label>
                 <NormalPeoplePicker
@@ -261,7 +299,9 @@ const Sidebar: React.FC<ISidebarProps> = ({
 
             <div className="mb-4">
                 <Label>2. Manage Approvers & Fields</Label>
-                <p className="text-muted small">Configure settings and drag fields onto the PDF.</p>
+                <HelpText className="mb-2">
+                    Approvers sign in the order listed. Use the arrows to change the order. Every approver needs at least one Initial or Signature box.
+                </HelpText>
                 <Stack tokens={{ childrenGap: 12 }}>
                     {approvers.map((approver, index) => {
                         const sigCount = placeholders.filter(p => p.approverId === approver.id && p.type === 'signature').length;
@@ -316,6 +356,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
 
                                 {/* Checkboxes */}
                                 <div className="mb-2">
+                                    <HelpText className="mb-1">Shown with the signature when this approver signs:</HelpText>
                                     <Checkbox
                                         label="Include Automatic Full Name"
                                         checked={approver.includeName}
@@ -344,9 +385,15 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                             label: { fontSize: 12 }
                                         }}
                                     />
+                                    {!approver.badgeNumber && (
+                                        <HelpText className="ms-4">No badge number registered for this approver.</HelpText>
+                                    )}
 
                                     <div className="mt-2 mb-3">
                                         <Label>Placement Mode</Label>
+                                        <HelpText className="mb-1">
+                                            Choose this before clicking Initial or Signature. Changing it later does not affect boxes already added.
+                                        </HelpText>
 
                                         <div className="form-check">
                                             <input
@@ -364,6 +411,9 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                             <label className="form-check-label">
                                                 Current Page
                                             </label>
+                                            <HelpText>
+                                                Adds one box on the page you are viewing now{numPages ? ` (page ${visiblePage} of ${numPages})` : ''}. Scroll the PDF to choose another page.
+                                            </HelpText>
                                         </div>
 
                                         <div className="form-check">
@@ -382,6 +432,9 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                             <label className="form-check-label">
                                                 All Pages
                                             </label>
+                                            <HelpText>
+                                                Adds the box on every page{numPages ? ` (${numPages} pages)` : ''}. Moving or resizing one box updates it on all pages.
+                                            </HelpText>
                                         </div>
 
                                         <div className="form-check">
@@ -400,6 +453,9 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                             <label className="form-check-label">
                                                 Page Range
                                             </label>
+                                            <HelpText>
+                                                Adds the box on each page from the From page to the To page, for example pages 2 to 5. Moving or resizing one box updates them all.
+                                            </HelpText>
                                         </div>
 
                                         <div className="form-check">
@@ -421,6 +477,9 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                             <label className="form-check-label">
                                                 Selected Pages
                                             </label>
+                                            <HelpText>
+                                                Adds the box only on the pages you tick, for example pages 1, 3 and 7. Moving or resizing one box updates them all.
+                                            </HelpText>
                                         </div>
 
                                         {
@@ -571,6 +630,11 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                 </div>
 
                                 {/* Drag Buttons - tap on mobile, drag on desktop */}
+                                <HelpText className="mb-2">
+                                    <b>Initial</b> adds a box for the approver&apos;s initials (paraf). <b>Signature</b> adds a box for the full signature. Each click adds a box in the middle of the page, based on the Placement Mode above.
+                                    Drag a box to move it, drag its bottom-right corner to resize it, and click × to remove it from that page.
+                                    <b> Clear</b> removes all boxes for this approver.
+                                </HelpText>
                                 <div className="d-flex flex-column gap-2">
                                     <div className="d-flex gap-2">
                                         <button
@@ -616,8 +680,11 @@ const Sidebar: React.FC<ISidebarProps> = ({
                         onChange={(ev, checked) => onReviewerCanDownloadChange(!!checked)}
                         onText="Yes"
                         offText="No"
-                        styles={{ root: { marginBottom: 8 }, label: { fontSize: 12, fontWeight: 600 } }}
+                        styles={{ root: { marginBottom: 0 }, label: { fontSize: 12, fontWeight: 600 } }}
                     />
+                    <HelpText className="mb-2">
+                        Yes: approvers can download the PDF while reviewing. No: approvers can only view it.
+                    </HelpText>
                     <Toggle
                         label="Embed QR Code on Document"
                         checked={embedQrCode}

@@ -31,6 +31,7 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
     const [placeholders, setPlaceholders] = useState<ISignaturePlaceholder[]>([]);
     const [placementMode, setPlacementMode] = useState<'current' | 'all' | 'range'>('current');
     const [numPages, setNumPages] = useState<number>(0);
+    const [visiblePage, setVisiblePage] = useState<number>(1); // Page the user is looking at
     const [isSaving, setIsSaving] = useState<boolean>(false);
     const [validationTriggered, setValidationTriggered] = useState<boolean>(false);
     const [hideDialog, setHideDialog] = useState<boolean>(true);
@@ -341,8 +342,10 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
         approver: IApprover,
         type: 'initial' | 'signature',
     ): void => {
+        // "Current Page" mode uses the page on screen; other modes ignore this value
+        const targetPage = Math.min(Math.max(visiblePage, 1), numPages || 1);
         handleSignatureDrop(
-            1, 50, 50,
+            targetPage, 50, 50,
             approver.id,
             type,
             approver.includeName,
@@ -688,6 +691,7 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                                 onUpdatePlaceholder={updatePlaceholder}
                                 onRemovePlaceholder={removePlaceholder}
                                 onDocumentLoaded={setNumPages}
+                                onVisiblePageChange={setVisiblePage}
                             />
                         </>
                     )}
@@ -714,6 +718,7 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                         onPlacementModeChange={setPlacementMode}
                         onClearApproverPlaceholders={clearApproverPlaceholders}
                         numPages={numPages}
+                        visiblePage={visiblePage}
                         onPlaceAtCenter={placeAtCenter}
                     />
                 </div>

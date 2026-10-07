@@ -35,6 +35,8 @@ interface IPdfViewerProps {
   onUpdatePlaceholder: (id: string, updates: Partial<ISignaturePlaceholder>) => void;
   onRemovePlaceholder: (id: string) => void;
   onDocumentLoaded?: (numPages: number) => void;
+  /** Called with the page that takes up most of the screen while the user scrolls */
+  onVisiblePageChange?: (page: number) => void;
 }
 
 const PdfViewer: React.FC<IPdfViewerProps> = ({
@@ -44,11 +46,47 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
   onDrop,
   onUpdatePlaceholder,
   onRemovePlaceholder,
-  onDocumentLoaded
+  onDocumentLoaded,
+  onVisiblePageChange
 }) => {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pdfWrapperWidth, setPdfWrapperWidth] = useState<number>(600); // Default start
   const wrapperRef = React.useRef<HTMLDivElement>(null);
+  const pageRefs = React.useRef<Map<number, HTMLDivElement>>(new Map());
+
+  // Track which page is most visible on screen (used by "Current Page" placement).
+  // root: null measures against the viewport, clipped by the scroll container.
+  useEffect(() => {
+    if (!numPages || !onVisiblePageChange || typeof IntersectionObserver === 'undefined') return;
+
+    const visibleHeights = new Map<number, number>();
+    let lastPage = 0;
+    const thresholds = Array.from({ length: 21 }, (_, i) => i / 20);
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        const page = Number((entry.target as HTMLElement).dataset.page);
+        visibleHeights.set(page, entry.isIntersecting ? entry.intersectionRect.height : 0);
+      });
+
+      let bestPage = lastPage || 1;
+      let bestHeight = -1;
+      visibleHeights.forEach((height, page) => {
+        if (height > bestHeight) {
+          bestHeight = height;
+          bestPage = page;
+        }
+      });
+
+      if (bestPage !== lastPage) {
+        lastPage = bestPage;
+        onVisiblePageChange(bestPage);
+      }
+    }, { root: null, threshold: thresholds });
+
+    pageRefs.current.forEach(el => observer.observe(el));
+    return () => observer.disconnect();
+  }, [numPages, pdfWrapperWidth, onVisiblePageChange]);
 
   // Interaction State
   const [interactingId, setInteractingId] = useState<string | null>(null);
@@ -381,6 +419,11 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
           return (
             <div
               key={`page_${pageNum}`}
+              data-page={pageNum}
+              ref={(el) => {
+                if (el) pageRefs.current.set(pageNum, el);
+                else pageRefs.current.delete(pageNum);
+              }}
               className={`mb-4 shadow position-relative bg-white ${isDragging ? 'touch-drop-active' : ''}`}
               onDrop={(e) => handleDrop(e, pageNum)}
               onDragOver={handleDragOver}
