@@ -41,13 +41,41 @@ export interface IApprover {
 }
 
 /**
- * Small muted helper text used under labels and options
+ * Whether help texts are shown; toggled by "Hide help" / "Show help" in the sidebar header
  */
-const HelpText: React.FC<{ className?: string }> = ({ children, className }) => (
-    <div className={`text-muted ${className || ''}`} style={{ fontSize: 11, lineHeight: 1.4 }}>
-        {children}
-    </div>
-);
+const HelpVisibleContext = React.createContext<boolean>(true);
+
+const HELP_VISIBLE_STORAGE_KEY = 'esign-initiate-show-help';
+
+const readHelpVisible = (): boolean => {
+    try {
+        return localStorage.getItem(HELP_VISIBLE_STORAGE_KEY) !== 'false';
+    } catch {
+        return true;
+    }
+};
+
+const saveHelpVisible = (visible: boolean): void => {
+    try {
+        localStorage.setItem(HELP_VISIBLE_STORAGE_KEY, String(visible));
+    } catch {
+        // Storage unavailable (private mode, blocked): the choice just isn't remembered
+    }
+};
+
+/**
+ * Small muted helper text used under labels and options.
+ * Hidden when help is collapsed, unless `always` is set (for status messages, not explanations).
+ */
+const HelpText: React.FC<{ className?: string; always?: boolean }> = ({ children, className, always }) => {
+    const visible = React.useContext(HelpVisibleContext);
+    if (!visible && !always) return null;
+    return (
+        <div className={`text-muted ${className || ''}`} style={{ fontSize: 11, lineHeight: 1.4 }}>
+            {children}
+        </div>
+    );
+};
 
 interface ISidebarProps {
     context: WebPartContext;
@@ -143,7 +171,12 @@ const Sidebar: React.FC<ISidebarProps> = ({
     };
 
     const [addingApprover, setAddingApprover] = React.useState<boolean>(false);
-    const [showGuide, setShowGuide] = React.useState<boolean>(true);
+    const [showGuide, setShowGuide] = React.useState<boolean>(readHelpVisible);
+
+    const toggleGuide = (): void => {
+        setShowGuide(!showGuide);
+        saveHelpVisible(!showGuide);
+    };
     const clampGridSize = (value: string): number => Math.min(10, Math.max(1, parseInt(value) || 1));
 
     const selectedGridBox = gridBoxes.find(b => b.id === selectedId);
@@ -298,6 +331,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
 
 
     return (
+        <HelpVisibleContext.Provider value={showGuide}>
         <div className="p-3 bg-white border-start h-100" style={{ overflowY: 'auto' }}>
             <div className="d-flex justify-content-between align-items-center mb-2">
                 <h5 className="mb-0">Workflow Setup</h5>
@@ -305,10 +339,11 @@ const Sidebar: React.FC<ISidebarProps> = ({
                     type="button"
                     className="btn btn-link btn-sm p-0"
                     style={{ fontSize: 12 }}
-                    onClick={() => setShowGuide(!showGuide)}
+                    onClick={toggleGuide}
                     aria-expanded={showGuide}
+                    title={showGuide ? 'Hide the guide and all explanations' : 'Show the guide and all explanations'}
                 >
-                    {showGuide ? 'Hide guide' : 'Show guide'}
+                    {showGuide ? 'Hide help' : 'Show help'}
                 </button>
             </div>
 
@@ -441,7 +476,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                         }}
                                     />
                                     {!approver.badgeNumber && (
-                                        <HelpText className="ms-4">No badge number registered for this approver.</HelpText>
+                                        <HelpText className="ms-4" always>No badge number registered for this approver.</HelpText>
                                     )}
 
                                     <div className="mt-2 mb-3">
@@ -949,7 +984,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
                         offText="No"
                         styles={{ root: { marginBottom: 0 }, label: { fontSize: 12, fontWeight: 600 } }}
                     />
-                    <p className="text-muted small mb-0" style={{ fontSize: 11, marginTop: 2 }}>QR code will be placed at the bottom-right corner of last page.</p>
+                    <HelpText className="mt-1">QR code will be placed at the bottom-right corner of last page.</HelpText>
                 </div>
                 <PrimaryButton
                     text={isSaving ? "Processing..." : "Process Workflow"}
@@ -959,6 +994,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
                 />
             </div>
         </div>
+        </HelpVisibleContext.Provider>
     );
 };
 
