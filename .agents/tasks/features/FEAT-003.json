@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Enforce all-or-nothing on reject in the approval form (InitiateEsignForm.tsx _submitReject). After the existing reject succeeds, if the current process is an AllOrNothing batch member, cancel its still-Processing batch siblings (set Status=Canceled with a 'System Canceled:' note and cancel their pending tasks), leaving Approved/Rejected/Canceled siblings untouched. Defensive and tolerant of missing BatchId/BatchMode columns. Depends only on the manually-created columns; independent of FEAT-001/FEAT-002 at build time but logically completes the feature.",
+  "status": "completed",
+  "steps": [
+    "In src/extensions/initiateEsignForm/components/InitiateEsignForm.tsx, locate _submitReject (around lines 670-739). Keep the existing reject logic (current task Status='Rejected', process update, activity log, success dialog) exactly as-is.",
+    "After the existing reject updates and activity log, add a defensive batch-cancel block wrapped in try/catch so any failure is logged (console.warn) and never prevents the reject from completing or the normal reject-success dialog from showing.",
+    "Inside the block, read the current process's BatchId and BatchMode: `const proc = await sp.web.lists.getByTitle(LIST_PROCESS).items.getById(this.state.processId).select(\"BatchId\",\"BatchMode\")();` Guard for undefined fields (missing columns). Proceed only if proc.BatchMode === \"AllOrNothing\" && proc.BatchId is a non-empty string.",
+    "Query siblings still in Processing: `sp.web.lists.getByTitle(LIST_PROCESS).items.select(\"Id\",\"Title\").filter(`BatchId eq '${batchId.replace(/'/g, \"''\")}' and Status eq 'Processing'`)();` then exclude the item whose Id === this.state.processId.",
+    "For each sibling: update `Status: \"Canceled\"` and `Notes: `System Canceled: Batch rejected (sibling document ${this.state.processTitle} was rejected)`` (use the exact 'System Canceled:' prefix so EsignDataService.getProcessCancelInfo/getCanceledDialogContent detection keeps working).",
+    "For each canceled sibling, cancel its pending Tasks: query LIST_TASKS where `ProcessID/Id eq ${siblingId} and Status eq 'Pending'` and update each to `Status: \"Canceled\", Comments: \"Canceled: batch rejected\"` — mirror the existing _cancelPendingTasks (InitiateEsignCommandSet.ts) / _cancelProcess (InitiateEsignForm.tsx) patterns.",
+    "Do NOT touch siblings whose Status is Approved, Rejected, or Canceled. Optionally extract a private helper `_cancelBatchSiblings(sp, batchId, rejectedProcessId, rejectedProcessTitle)` on the class for clarity.",
+    "If BatchMode is None/empty/missing or BatchId empty, skip all sibling logic so behavior is identical to today. Ensure field reads cannot throw when the columns are absent."
+  ],
+  "acceptance_criteria": [
+    "_submitReject still completes the reject and shows the normal reject-success dialog even if the batch-cancel block fails (try/catch, logged only).",
+    "When the rejected process has BatchMode='AllOrNothing' and a non-empty BatchId, its sibling processes still in 'Processing' are set to 'Canceled' with a Notes value beginning exactly 'System Canceled:' and their pending Tasks are set to 'Canceled'.",
+    "Siblings already 'Approved' are left 'Approved'; 'Rejected'/'Canceled' siblings are untouched; the just-rejected process is excluded from the sibling update.",
+    "When BatchMode is None/empty/missing, no sibling lookups occur and behavior is identical to the current single-reject flow; missing BatchId/BatchMode columns never throw.",
+    "`npm run build` exits 0 with no TypeScript/ESLint errors."
+  ],
+  "verification": [
+    "Run `npm run build` and confirm it exits 0 with no TypeScript or ESLint errors.",
+    "Code review: confirm the 'System Canceled:' prefix matches SYSTEM_CANCEL_PREFIX usage in EsignDataService.ts, OData filters escape single quotes, and the batch block is fully wrapped in try/catch after the reject."
+  ],
+  "blocked_reason": null,
+  "findings": "Implemented in src/extensions/initiateEsignForm/components/InitiateEsignForm.tsx. Added a new private method _cancelBatchSiblings(sp, rejectedProcessId, rejectedProcessTitle) and invoke it in _submitReject AFTER the existing reject update + activity log, inside the same try (so the surrounding reject error handler still applies) but gated on this.state.processId. The method is fully defensive: (1) reads BatchId/BatchMode via .select('BatchId','BatchMode') wrapped in its own try/catch so missing columns log a console.warn and return without throwing; (2) proceeds only when BatchMode==='AllOrNothing' && BatchId non-empty string, otherwise returns immediately so non-batch rejects behave identically; (3) queries LIST_PROCESS siblings with Status eq 'Processing' and the same BatchId (single quotes escaped via .replace(/'/g,\"''\")), excludes the rejected process by Id; (4) for each sibling sets Status='Canceled' and Notes beginning exactly 'System Canceled:' (matches SYSTEM_CANCEL_PREFIX = 'System Canceled:' in EsignDataService.ts, detected via indexOf===0) then cancels its Pending LIST_TASKS (ProcessID/Id eq <id> and Status eq 'Pending' -> Status='Canceled', Comments='Canceled: batch rejected', mirroring _cancelPendingTasks in InitiateEsignCommandSet.ts). Siblings with Status Approved/Rejected/Canceled are never touched (filter only pulls 'Processing'). Per-sibling and per-task errors are caught individually; the whole method is wrapped in try/catch so it never blocks the reject or the reject-success dialog. Added LIST_TASKS to the existing constants import. Verification: npm run build exits 0; the only 7 lint warnings are pre-existing in files not touched by this feature (ApprovalService.ts, EsignDataService.ts, UserService.ts, Sidebar.tsx) \u2014 none in InitiateEsignForm.tsx. Depends on manually-created BatchId/BatchMode columns; tolerant if they are absent."
+}

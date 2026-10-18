@@ -13,7 +13,7 @@ import "@pnp/sp/lists";
 import "@pnp/sp/items";
 import "@pnp/sp/files";
 import SignaturePad from "signature_pad";
-import { TENANT_DOMAIN, LIST_ACTIVITY_LOG, LIST_PROCESS, SITE_REDIRECT, DATABASE_SPECIMEN } from "../../../common/constants";
+import { TENANT_DOMAIN, LIST_ACTIVITY_LOG, LIST_PROCESS, LIST_TASKS, SITE_REDIRECT, DATABASE_SPECIMEN } from "../../../common/constants";
 
 // Centralized Models
 import {
@@ -729,11 +729,92 @@ export default class InitiateEsignForm extends React.Component<IInitiateEsignFor
                 console.warn("Failed to log activity:", logErr);
             }
 
+            // ALL-OR-NOTHING BATCH: if this process belongs to an AllOrNothing batch,
+            // cancel its still-Processing siblings. Fully defensive so it never blocks
+            // the reject or the reject-success dialog, and tolerant of missing columns.
+            if (this.state.processId) {
+                await this._cancelBatchSiblings(
+                    sp,
+                    this.state.processId,
+                    this.state.processTitle || "Unknown Process"
+                );
+            }
+
             this.setState({ isSaving: false, isRejectDialogOpen: false, isSuccessDialogOpen: true, successMessage: "Document has been rejected successfully." });
 
         } catch (err) {
             console.error(err);
             this.setState({ isSaving: false, error: "Failed to reject document." });
+        }
+    };
+
+    /**
+     * All-or-nothing enforcement for batch rejects. When the just-rejected process is a
+     * member of an AllOrNothing batch, set every still-Processing sibling to Canceled
+     * (with a 'System Canceled:' note so the canceled-dialog detection keeps working) and
+     * cancel their pending Tasks. Siblings already Approved/Rejected/Canceled are left
+     * untouched, and the rejected process itself is excluded. The whole routine is wrapped
+     * in try/catch and tolerant of missing BatchId/BatchMode columns: any failure is logged
+     * and never prevents the reject from completing.
+     */
+    private _cancelBatchSiblings = async (sp: SPFI, rejectedProcessId: number, rejectedProcessTitle: string): Promise<void> => {
+        try {
+            // Read batch metadata defensively. Missing columns return undefined, never throw.
+            let proc: { BatchId?: string; BatchMode?: string } | undefined;
+            try {
+                proc = await sp.web.lists.getByTitle(LIST_PROCESS).items
+                    .getById(rejectedProcessId)
+                    .select("BatchId", "BatchMode")<{ BatchId?: string; BatchMode?: string }>();
+            } catch (metaErr) {
+                console.warn("Batch cancel: unable to read BatchId/BatchMode (columns may not exist); skipping.", metaErr);
+                return;
+            }
+
+            const batchMode = proc && proc.BatchMode ? proc.BatchMode : "";
+            const batchId = proc && proc.BatchId ? String(proc.BatchId) : "";
+
+            // Only enforce for AllOrNothing batches with a real BatchId. Otherwise behave
+            // exactly like a single-document reject (no sibling lookups).
+            if (batchMode !== "AllOrNothing" || batchId.length === 0) {
+                return;
+            }
+
+            // Find siblings still in Processing within the same batch.
+            const siblings = await sp.web.lists.getByTitle(LIST_PROCESS).items
+                .select("Id", "Title")
+                .filter(`BatchId eq '${batchId.replace(/'/g, "''")}' and Status eq 'Processing'`)<{ Id: number; Title: string }[]>();
+
+            const targets = siblings.filter((s) => s.Id !== rejectedProcessId);
+
+            for (const sibling of targets) {
+                try {
+                    await sp.web.lists.getByTitle(LIST_PROCESS).items.getById(sibling.Id).update({
+                        Status: "Canceled",
+                        Notes: `System Canceled: Batch rejected (sibling document ${rejectedProcessTitle} was rejected)`
+                    });
+
+                    // Cancel the sibling's pending Tasks (mirror _cancelPendingTasks).
+                    try {
+                        const tasks = await sp.web.lists.getByTitle(LIST_TASKS).items
+                            .select("Id", "ProcessID/Id")
+                            .expand("ProcessID")
+                            .filter(`ProcessID/Id eq ${sibling.Id} and Status eq 'Pending'`)<{ Id: number }[]>();
+
+                        await Promise.all(tasks.map((task) =>
+                            sp.web.lists.getByTitle(LIST_TASKS).items.getById(task.Id).update({
+                                Status: "Canceled",
+                                Comments: "Canceled: batch rejected"
+                            })
+                        ));
+                    } catch (taskErr) {
+                        console.warn(`Batch cancel: failed to cancel pending tasks for sibling ${sibling.Id}`, taskErr);
+                    }
+                } catch (siblingErr) {
+                    console.warn(`Batch cancel: failed to cancel sibling process ${sibling.Id}`, siblingErr);
+                }
+            }
+        } catch (err) {
+            console.warn("Batch cancel: all-or-nothing sibling cancellation failed; reject already completed.", err);
         }
     };
 
