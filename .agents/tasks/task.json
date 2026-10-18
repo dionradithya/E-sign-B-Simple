@@ -1,0 +1,7 @@
+{
+  "task_id": "task-batch-esign-finance",
+  "task_description": "Add a batch e-Sign (all-or-nothing) feature to the existing SPFx solution for the Finance library (/sites/DMS/Finance). A new COMMAND_BATCH command lets a requestor initiate signatures on >=2 PDFs or a folder at once; the initiate page configures approvers+placeholders per-document and creates one Approvals Process item per document sharing a BatchId with BatchMode=AllOrNothing; on the approval form, rejecting one document cancels its still-Processing batch siblings (leaving Approved ones alone). The single-document flow and COMMAND_1/2/3 stay behavior-identical. Columns BatchId/BatchMode are created manually by the owner; code is tolerant of missing columns. No email code and no Power Automate flow are built here (the existing item-created flow sends per-document emails).",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}
