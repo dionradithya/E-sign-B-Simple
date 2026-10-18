@@ -4,6 +4,7 @@ export const LIST_PROCESS = "Approvals Process";
 export const LIST_TASKS = "Tasks";
 export const LIST_ACTIVITY_LOG = "Activity Log";
 export const SITE_REDIRECT = "sites/DMS";
+export const LIST_FINANCE_PATH = "/sites/DMS/Finance";
 export const DATABASE_SPECIMEN = "Specimen";
 export const LIST_APPROVAL_MAP = "Approval Map";
 export const LIST_ACTIVE_SITES = "Active Sites";

@@ -13,7 +13,9 @@ import "@pnp/sp/lists";
 import "@pnp/sp/items";
 import ConfirmationDialog from "./components/ConfirmationDialog";
 import SignatureLogDialog from "./components/SignatureLogDialog";
-import { TENANT_DOMAIN, SITES_ESIGN, LIST_PROCESS, LIST_TASKS, LIST_ACTIVE_SITES, PAGE_INITIATE_ESIGN } from "../../common/constants";
+import { TENANT_DOMAIN, SITES_ESIGN, LIST_PROCESS, LIST_TASKS, LIST_ACTIVE_SITES, PAGE_INITIATE_ESIGN, LIST_FINANCE_PATH, SITE_REDIRECT } from "../../common/constants";
+import "@pnp/sp/folders";
+import "@pnp/sp/files";
 
 interface IActiveSiteConfig {
   Title: string; // Site relative URL/path
@@ -161,6 +163,74 @@ export default class InitiateEsignCommandSet extends BaseListViewCommandSet<IIni
           });
         break;
       }
+      case "COMMAND_BATCH": {
+        const selectedRows = event.selectedRows ?? [];
+        if (selectedRows.length === 0) {
+          console.log("Error: Tidak ada file yang dipilih.");
+          return;
+        }
+
+        // Read against the DMS site where the Finance library lives.
+        const sp = getSP(this.context, `${TENANT_DOMAIN}/${SITE_REDIRECT}`);
+
+        const isPdfLeaf = (leafRef: string): boolean =>
+          !!leafRef && leafRef.toLowerCase().endsWith(".pdf");
+
+        const isFolderRow = (row: typeof selectedRows[number]): boolean => {
+          const fsObjType = row.getValueByName("FSObjType");
+          if (fsObjType !== undefined && fsObjType !== null && `${fsObjType}` !== "") {
+            return `${fsObjType}` === "1";
+          }
+          const leafRef: string = row.getValueByName("FileLeafRef") || "";
+          return leafRef.length > 0 && leafRef.indexOf(".") === -1;
+        };
+
+        // Collect FileRefs from directly selected PDF files, and expand selected folders into their PDFs.
+        const collectFileRefs = async (): Promise<string[]> => {
+          const refs: string[] = [];
+
+          for (const row of selectedRows) {
+            const leafRef: string = row.getValueByName("FileLeafRef") || "";
+            const fileRef: string = row.getValueByName("FileRef") || "";
+
+            if (isFolderRow(row)) {
+              if (!fileRef) continue;
+              try {
+                const files = await sp.web.getFolderByServerRelativePath(fileRef).files();
+                for (const f of files as { Name: string; ServerRelativeUrl: string }[]) {
+                  if (isPdfLeaf(f.Name) && f.ServerRelativeUrl) {
+                    refs.push(f.ServerRelativeUrl);
+                  }
+                }
+              } catch (e) {
+                console.error(LOG_SOURCE, "Failed to enumerate folder PDFs", fileRef, e);
+              }
+            } else if (isPdfLeaf(leafRef) && fileRef) {
+              refs.push(fileRef);
+            }
+          }
+
+          // Deduplicate.
+          return Array.from(new Set(refs));
+        };
+
+        collectFileRefs().then((fileRefs) => {
+          if (fileRefs.length === 0) {
+            Dialog.alert("No PDF files found in the selection.").catch(console.error);
+            return;
+          }
+
+          // Note: even exactly 1 PDF proceeds here as a 1-document batch; COMMAND_1
+          // only triggers for a single directly-selected PDF, not for folder expansion.
+          const webUrlInitiateEsign = `${TENANT_DOMAIN}/${SITES_ESIGN}`;
+          const webUrlNow = this.context.pageContext.web.absoluteUrl;
+          window.location.href = `${webUrlInitiateEsign}/SitePages/${PAGE_INITIATE_ESIGN}?fileRefs=${encodeURIComponent(JSON.stringify(fileRefs))}&source=${encodeURIComponent(webUrlNow)}`;
+        }).catch((err) => {
+          console.error(LOG_SOURCE, "Failed to build batch file list", err);
+          Dialog.alert("Failed to prepare batch request.").catch(console.error);
+        });
+        break;
+      }
       default:
         throw new Error("Unknown command");
     }
@@ -280,6 +350,46 @@ export default class InitiateEsignCommandSet extends BaseListViewCommandSet<IIni
       if (compareOneCommand) compareOneCommand.visible = false;
       if (compareTwoCommand) compareTwoCommand.visible = false;
       if (compareThreeCommand) compareThreeCommand.visible = false;
+      this.raiseOnChange();
+    }
+
+    // COMMAND_BATCH visibility (Finance library only). This is independent of the
+    // COMMAND_1/2/3 logic above and must not alter it.
+    const compareBatchCommand: Command = this.tryGetCommand("COMMAND_BATCH");
+    if (compareBatchCommand) {
+      // Finance-library detection: web server-relative URL starts with /sites/DMS/Finance (case-insensitive).
+      const isFinanceLibrary =
+        this.context.pageContext.web.serverRelativeUrl
+          .toLowerCase()
+          .indexOf(LIST_FINANCE_PATH.toLowerCase()) === 0;
+
+      const selectedRows = this.context.listView.selectedRows ?? [];
+
+      // Detect folders via FSObjType === "1"; fallback: a FileLeafRef without a .pdf extension and no dot.
+      const isFolderRow = (row: typeof selectedRows[number]): boolean => {
+        const fsObjType = row.getValueByName("FSObjType");
+        if (fsObjType !== undefined && fsObjType !== null && `${fsObjType}` !== "") {
+          return `${fsObjType}` === "1";
+        }
+        const leafRef: string = row.getValueByName("FileLeafRef") || "";
+        return leafRef.length > 0 && leafRef.indexOf(".") === -1;
+      };
+
+      // Detect PDFs via FileLeafRef ending with .pdf.
+      const isPdfRow = (row: typeof selectedRows[number]): boolean => {
+        const leafRef: string = row.getValueByName("FileLeafRef") || "";
+        return leafRef.toLowerCase().endsWith(".pdf");
+      };
+
+      const pdfCount = selectedRows.filter(isPdfRow).length;
+      const folderRows = selectedRows.filter(isFolderRow);
+      const folderCount = folderRows.length;
+
+      // Show only in Finance for (>=2 PDFs) OR (exactly one folder selected).
+      // Keep hidden when exactly 1 PDF is selected (COMMAND_1 handles that) and outside Finance.
+      compareBatchCommand.visible =
+        isFinanceLibrary && (pdfCount >= 2 || (folderCount === 1 && selectedRows.length === 1));
+
       this.raiseOnChange();
     }
   }
