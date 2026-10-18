@@ -19,6 +19,62 @@ import { sanitizeApproverName, getEncodedFolderUrl } from '../../../common/utils
 import { Dialog, DialogType, DialogFooter, PrimaryButton } from '@fluentui/react';
 import { LIST_PROCESS, LIST_ACTIVITY_LOG, TENANT_DOMAIN, SITES_ESIGN, SITE_REDIRECT } from '../../../common/constants';
 
+/**
+ * Parameters for createProcessForDocument — the reusable per-document creation routine shared by
+ * the single-document save and the batch loop. When `batch` is omitted the created Approvals
+ * Process item is identical to the original single-flow item (no BatchId/BatchMode). When `batch`
+ * is supplied, every item in the batch shares one batchId and BatchMode='AllOrNothing'.
+ */
+interface ICreateProcessParams {
+    fileRef: string;
+    fileBlob: Blob;
+    approvers: IApprover[];
+    placeholders: ISignaturePlaceholder[];
+    reviewerCanDownload: boolean;
+    embedQrCode: boolean;
+    currentUserId: number;
+    spDoc: SPFI;
+    spList: SPFI;
+    batch?: { batchId: string; batchMode: string };
+}
+
+/**
+ * A single document being configured in batch mode. Each descriptor keeps its own approvers and
+ * placeholders so every document is configured independently before the all-or-nothing submit.
+ */
+interface IBatchDocument {
+    fileRef: string;
+    fileName: string;
+    blob: Blob | undefined;
+    fileUrl: string | undefined;
+    approvers: IApprover[];
+    placeholders: ISignaturePlaceholder[];
+    reviewerCanDownload: boolean;
+    embedQrCode: boolean;
+    loaded: boolean;
+}
+
+/**
+ * Generate a RFC-4122 v4 UUID. Uses crypto.randomUUID when available, otherwise a getRandomValues
+ * fallback so the batch still gets a unique BatchId in older runtimes.
+ */
+const generateBatchId = (): string => {
+    const c = (typeof crypto !== 'undefined') ? crypto : undefined;
+    if (c && typeof c.randomUUID === 'function') {
+        return c.randomUUID();
+    }
+    // Fallback UUID v4
+    const bytes = new Uint8Array(16);
+    if (c && typeof c.getRandomValues === 'function') {
+        c.getRandomValues(bytes);
+    } else {
+        for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0'));
+    return `${hex[0]}${hex[1]}${hex[2]}${hex[3]}-${hex[4]}${hex[5]}-${hex[6]}${hex[7]}-${hex[8]}${hex[9]}-${hex[10]}${hex[11]}${hex[12]}${hex[13]}${hex[14]}${hex[15]}`;
+};
 
 
 const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
@@ -48,7 +104,38 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
     const fileRef = queryParams.get('fileRef');
     const sourcePage = queryParams.get('source');
 
+    // Batch mode detection (FEAT-002): the batch command redirects with a `fileRefs` query param
+    // holding a URI-encoded JSON array of server-relative URLs (see FEAT-001 findings). If present
+    // and it parses to an array of >=1 strings we enter batch mode; otherwise the single-file path
+    // below behaves exactly as before.
+    const batchFileRefs = React.useMemo<string[] | null>(() => {
+        const raw = queryParams.get('fileRefs');
+        if (!raw) return null;
+        try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length >= 1 && parsed.every(r => typeof r === 'string')) {
+                return parsed as string[];
+            }
+        } catch (e) {
+            console.error('[InitiateSignature] Failed to parse fileRefs query param', e);
+        }
+        return null;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    const isBatchMode = !!batchFileRefs;
+
+    // Per-document batch state: each document keeps its own approvers/placeholders.
+    const [batchDocs, setBatchDocs] = useState<IBatchDocument[]>([]);
+    const [activeDocIndex, setActiveDocIndex] = useState<number>(0);
+    const [batchValidationMessage, setBatchValidationMessage] = useState<string | null>(null);
+    const [batchDialogVisible, setBatchDialogVisible] = useState<boolean>(false);
+
+    // Single-document fetch effect. Skipped entirely in batch mode so there is zero behavior
+    // change for the single flow (and so the no-fileRef redirect does not fire during a batch).
     useEffect(() => {
+        if (isBatchMode) {
+            return;
+        }
         if (!fileRef) {
             window.location.href = `${TENANT_DOMAIN}/${SITE_REDIRECT}`;
             return;
@@ -121,7 +208,8 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
         return () => {
             if (fileUrl) URL.revokeObjectURL(fileUrl);
         };
-    }, [fileRef, context]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fileRef, context, isBatchMode]);
 
     // Fetch Approval Map
     useEffect(() => {
@@ -135,6 +223,119 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
 
         fetchMap().catch(console.error);
     }, [context]);
+
+    // Batch mode: load every selected PDF once and seed per-document state. Reuses the same
+    // cross-site fetch logic as the single flow (getSP against the source site + getFileByServerRelativePath).
+    useEffect(() => {
+        if (!isBatchMode || !batchFileRefs) {
+            return;
+        }
+
+        const loadBatch = async (): Promise<void> => {
+            setLoading(true);
+            try {
+                const sp: SPFI = getSP(context, sourcePage || undefined);
+
+                const docs: IBatchDocument[] = await Promise.all(batchFileRefs.map(async (ref): Promise<IBatchDocument> => {
+                    const fileName = ref.substring(ref.lastIndexOf('/') + 1);
+                    try {
+                        const fileObj = sp.web.getFileByServerRelativePath(ref);
+                        const blob = await fileObj.getBlob();
+                        const url = URL.createObjectURL(blob);
+                        return {
+                            fileRef: ref,
+                            fileName,
+                            blob: blob,
+                            fileUrl: url,
+                            approvers: [],
+                            placeholders: [],
+                            reviewerCanDownload: true,
+                            embedQrCode: true,
+                            loaded: true
+                        };
+                    } catch (docErr) {
+                        console.error(`[InitiateSignature] Failed to load batch document ${ref}`, docErr);
+                        return {
+                            fileRef: ref,
+                            fileName,
+                            blob: undefined,
+                            fileUrl: undefined,
+                            approvers: [],
+                            placeholders: [],
+                            reviewerCanDownload: true,
+                            embedQrCode: true,
+                            loaded: false
+                        };
+                    }
+                }));
+
+                setBatchDocs(docs);
+                setActiveDocIndex(0);
+            } catch (err) {
+                console.error('[InitiateSignature] Error loading batch documents', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadBatch().catch(console.error);
+
+        return () => {
+            // Revoke any object URLs created for the batch documents.
+            setBatchDocs(prev => {
+                prev.forEach(d => { if (d.fileUrl) URL.revokeObjectURL(d.fileUrl); });
+                return prev;
+            });
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isBatchMode, context]);
+
+    // Batch mode: mirror the active document into the shared editing state (approvers,
+    // placeholders, blob, metadata, toggles) so the existing Sidebar + PdfViewer render and
+    // mutate the currently selected document without any prop changes.
+    useEffect(() => {
+        if (!isBatchMode) {
+            return;
+        }
+        const doc = batchDocs[activeDocIndex];
+        if (!doc) {
+            return;
+        }
+        setApprovers(doc.approvers);
+        setPlaceholders(doc.placeholders);
+        setReviewerCanDownload(doc.reviewerCanDownload);
+        setEmbedQrCode(doc.embedQrCode);
+        setFileBlob(doc.blob || null);
+        setFileUrl(doc.fileUrl || null);
+        setValidationTriggered(false);
+        setFileMetadata(doc.blob ? {
+            fileName: doc.fileName,
+            fileRef: doc.fileRef,
+            folder: doc.fileRef.substring(0, doc.fileRef.lastIndexOf('/')),
+            origin: window.location.origin
+        } : null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isBatchMode, activeDocIndex, batchDocs.length]);
+
+    // Batch mode: write the shared editing state back into the active document descriptor so each
+    // document retains its own approvers/placeholders/toggles when the user navigates away.
+    useEffect(() => {
+        if (!isBatchMode) {
+            return;
+        }
+        setBatchDocs(prev => {
+            const doc = prev[activeDocIndex];
+            if (!doc) return prev;
+            if (doc.approvers === approvers && doc.placeholders === placeholders &&
+                doc.reviewerCanDownload === reviewerCanDownload && doc.embedQrCode === embedQrCode) {
+                return prev;
+            }
+            const next = prev.slice();
+            next[activeDocIndex] = { ...doc, approvers, placeholders, reviewerCanDownload, embedQrCode };
+            return next;
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [approvers, placeholders, reviewerCanDownload, embedQrCode]);
 
     // TEMPORARY
     useEffect(() => {
@@ -425,6 +626,175 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
         setPlaceholders(placeholders.filter(p => p.approverId !== id));
     };
 
+    // Reusable per-document creation routine shared by the single-flow save and the batch loop.
+    // When `params.batch` is undefined the LIST_PROCESS payload is byte-for-byte identical to the
+    // original single-document save; when provided it ALSO stamps BatchId/BatchMode on the item.
+    const createProcessForDocument = async (params: ICreateProcessParams): Promise<void> => {
+        const { fileRef: docFileRef, fileBlob: docBlob, approvers: docApprovers, placeholders: docPlaceholders, reviewerCanDownload: docReviewerCanDownload, embedQrCode: docEmbedQrCode, currentUserId, spDoc, spList, batch } = params;
+
+        // Generate Title ESIN-ddmmyy
+        const now = new Date();
+        const day = String(now.getDate()).padStart(2, '0');
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const year = String(now.getFullYear()).slice(-2);
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+        const randomSuffix = Math.random().toString(36).substring(2, 5).toUpperCase();
+        const esinTitle = `REQ-ESIGN-${day}${month}${year}${hours}${minutes}${seconds}${randomSuffix}`;
+
+        // Embed Barcode Logic Start 
+        let finalBlobToHash = docBlob;
+        if (docEmbedQrCode) {
+            try {
+                const qrContent = `${TENANT_DOMAIN}/${SITE_REDIRECT}/SitePages/Document-Tracker.aspx?code=${esinTitle}`;
+                const qrImageBytes = await generateQrCodeImageBytes(qrContent);
+
+                // 2. Manipulate PDF
+                const arrayBuffer = await docBlob.arrayBuffer();
+                const pdfDoc = await PDFDocument.load(arrayBuffer);
+                const pngImage = await pdfDoc.embedPng(qrImageBytes);
+
+                // 3. Draw on the last page bottom-right, sized as 12% of the smaller page dimension
+                const pages = pdfDoc.getPages();
+
+                if (pages.length > 0) {
+                    const lastPage = pages[pages.length - 1];
+                    const { width: pageWidth, height: pageHeight } = lastPage.getSize();
+
+                    // Determine if page is portrait or landscape
+                    const isPortrait = pageHeight > pageWidth;
+                    // Size: 14% for portrait, 16% for landscape
+                    const sizeFactor = isPortrait ? 0.12 : 0.16;
+
+                    const qrSize = Math.min(pageWidth, pageHeight) * sizeFactor;
+                    const padding = 2;
+
+                    // Position bottom-right with a margin
+                    const marginX = 15;
+                    const marginY = 15;
+                    const qrX = pageWidth - qrSize - marginX;
+                    const qrY = marginY;
+
+                    // Draw white background rectangle behind QR code
+                    lastPage.drawRectangle({
+                        x: qrX - padding,
+                        y: qrY - padding,
+                        width: qrSize + padding * 2,
+                        height: qrSize + padding * 2,
+                        color: rgb(1, 1, 1),
+                        borderWidth: 0,
+                    });
+                    // Draw QR code on top
+                    lastPage.drawImage(pngImage, {
+                        x: qrX,
+                        y: qrY,
+                        width: qrSize,
+                        height: qrSize,
+                    });
+                }
+
+                // 4. Save and Overwrite SharePoint File
+                const modifiedPdfBytes = await pdfDoc.save();
+                finalBlobToHash = new Blob([modifiedPdfBytes as unknown as BlobPart], { type: 'application/pdf' });
+
+                // In @pnp/sp, setContentChunked usually takes a Blob or Stream
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                await spDoc.web.getFileByServerRelativePath(docFileRef).setContentChunked(finalBlobToHash as any, {
+                    progress: (data) => console.log("Upload progress:", data.stage, data.offset)
+                });
+
+            } catch (qrError) {
+                console.error("Failed to embed QR code", qrError);
+                throw qrError; // Rethrow to halt the actual processing and show normal error log
+            }
+        } // end if embedQrCode
+        // Embed Barcode Logic End
+
+        // Generate Hash from modified (or original) PDF
+        const hashHex = await generatePDFHash(finalBlobToHash);
+
+        // Construct ProcessSignature
+        const processSignature = docApprovers.map(approver => {
+            const appPlaceholders = docPlaceholders.filter(p => p.approverId === approver.id);
+
+            console.log("APPROVER", approver);
+
+            const placeholderPayload = appPlaceholders.map(p => ({
+                PageNo: p.page,
+                Left: p.x,
+                Top: p.y,
+                Width: p.width,
+                Height: p.height,
+                PlaceType: p.type === 'initial' ? 2 : 1,
+                displayName: sanitizeApproverName(approver.displayName),
+                BadgeNumber: approver.badgeNumber || "",
+                ChecklistDate: p.checklistDate.toString(),
+                CheckListName: p.checklistName.toString(),
+                CheckListBadge: (p.checklistBadge || false).toString()
+            }));
+
+            const mapItem = approvalMap.find(m => m.Approver.Id === approver.id);
+            const authorizedApprovers = mapItem ? mapItem.AuthorizedApprovers : "";
+            const secretaries = mapItem ? mapItem.Secretaries : "";
+
+            return {
+                userId: approver.id,
+                displayNameApprover: approver.displayName,
+                emailApprover: approver.email,
+                badgeNumberApprover: approver.badgeNumber || "",
+                authorizedApprovers: authorizedApprovers,
+                secretaries: secretaries,
+                Placeholder: placeholderPayload
+            };
+        });
+
+        // Title is already generated above
+        // Construct Full JSON
+        const payload = {
+            title: esinTitle,
+            requestor: {
+                email: context.pageContext.user.email,
+                displayName: context.pageContext.user.displayName,
+            },
+            hashHex: hashHex,
+            fileRef: docFileRef,
+            status: "Processing",
+            ProcessSignature: processSignature
+        };
+
+        const jsonString = JSON.stringify(payload);
+        const emailString = docApprovers.map(a => a.email).join(';');
+
+        // Build the LIST_PROCESS add payload. Keep this byte-for-byte identical to the original
+        // single-document save; only stamp BatchId/BatchMode when running as part of a batch.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const listProcessPayload: any = {
+            Title: payload.title,
+            HashHex: payload.hashHex,
+            FileRef0: payload.fileRef,
+            RequestorId: currentUserId,
+            Status: payload.status,
+            ProcessData: jsonString,
+            UserNotif: emailString,
+            isDownloadable: docReviewerCanDownload.toString()
+        };
+        if (batch) {
+            listProcessPayload.BatchId = batch.batchId;
+            listProcessPayload.BatchMode = batch.batchMode;
+        }
+
+        // Save to LIST_PROCESS list
+        await spList.web.lists.getByTitle(LIST_PROCESS).items.add(listProcessPayload);
+
+        // Save to LIST_ACTIVITY_LOG
+        await spList.web.lists.getByTitle(LIST_ACTIVITY_LOG).items.add({
+            Activity: "Initiated Signature Request",
+            UserIdId: currentUserId,
+            ProcessTitle: payload.title
+        });
+    };
+
     const handleSaveWorkflow = async (): Promise<void> => {
         if (!fileMetadata || !fileBlob) return;
 
@@ -457,162 +827,22 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
             // SP for list operations (eSign site where LIST_PROCESS and LIST_ACTIVITY_LOG live)
             const spList: SPFI = getSP(context, esignSiteUrl);
 
-            // Generate Title ESIN-ddmmyy
-            const now = new Date();
-            const day = String(now.getDate()).padStart(2, '0');
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const year = String(now.getFullYear()).slice(-2);
-            const hours = String(now.getHours()).padStart(2, '0');
-            const minutes = String(now.getMinutes()).padStart(2, '0');
-            const seconds = String(now.getSeconds()).padStart(2, '0');
-            const randomSuffix = Math.random().toString(36).substring(2, 5).toUpperCase();
-            const esinTitle = `REQ-ESIGN-${day}${month}${year}${hours}${minutes}${seconds}${randomSuffix}`;
-
-            // Embed Barcode Logic Start 
-            let finalBlobToHash = fileBlob;
-            if (embedQrCode) {
-                try {
-                    const qrContent = `${TENANT_DOMAIN}/${SITE_REDIRECT}/SitePages/Document-Tracker.aspx?code=${esinTitle}`;
-                    const qrImageBytes = await generateQrCodeImageBytes(qrContent);
-
-                    // 2. Manipulate PDF
-                    const arrayBuffer = await fileBlob.arrayBuffer();
-                    const pdfDoc = await PDFDocument.load(arrayBuffer);
-                    const pngImage = await pdfDoc.embedPng(qrImageBytes);
-
-                    // 3. Draw on the last page bottom-right, sized as 12% of the smaller page dimension
-                    const pages = pdfDoc.getPages();
-
-                    if (pages.length > 0) {
-                        const lastPage = pages[pages.length - 1];
-                        const { width: pageWidth, height: pageHeight } = lastPage.getSize();
-
-                        // Determine if page is portrait or landscape
-                        const isPortrait = pageHeight > pageWidth;
-                        // Size: 14% for portrait, 16% for landscape
-                        const sizeFactor = isPortrait ? 0.12 : 0.16;
-
-                        const qrSize = Math.min(pageWidth, pageHeight) * sizeFactor;
-                        const padding = 2;
-
-                        // Position bottom-right with a margin
-                        const marginX = 15;
-                        const marginY = 15;
-                        const qrX = pageWidth - qrSize - marginX;
-                        const qrY = marginY;
-
-                        // Draw white background rectangle behind QR code
-                        lastPage.drawRectangle({
-                            x: qrX - padding,
-                            y: qrY - padding,
-                            width: qrSize + padding * 2,
-                            height: qrSize + padding * 2,
-                            color: rgb(1, 1, 1),
-                            borderWidth: 0,
-                        });
-                        // Draw QR code on top
-                        lastPage.drawImage(pngImage, {
-                            x: qrX,
-                            y: qrY,
-                            width: qrSize,
-                            height: qrSize,
-                        });
-                    }
-
-                    // 4. Save and Overwrite SharePoint File
-                    const modifiedPdfBytes = await pdfDoc.save();
-                    finalBlobToHash = new Blob([modifiedPdfBytes as unknown as BlobPart], { type: 'application/pdf' });
-
-                    // In @pnp/sp, setContentChunked usually takes a Blob or Stream
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    await spDoc.web.getFileByServerRelativePath(fileMetadata.fileRef).setContentChunked(finalBlobToHash as any, {
-                        progress: (data) => console.log("Upload progress:", data.stage, data.offset)
-                    });
-
-                } catch (qrError) {
-                    console.error("Failed to embed QR code", qrError);
-                    throw qrError; // Rethrow to halt the actual processing and show normal error log
-                }
-            } // end if embedQrCode
-            // Embed Barcode Logic End
-
-            // Generate Hash from modified (or original) PDF
-            const hashHex = await generatePDFHash(finalBlobToHash);
-
-            // Construct ProcessSignature
-            const processSignature = approvers.map(approver => {
-                const appPlaceholders = placeholders.filter(p => p.approverId === approver.id);
-
-                console.log("APPROVER", approver);
-
-                const placeholderPayload = appPlaceholders.map(p => ({
-                    PageNo: p.page,
-                    Left: p.x,
-                    Top: p.y,
-                    Width: p.width,
-                    Height: p.height,
-                    PlaceType: p.type === 'initial' ? 2 : 1,
-                    displayName: sanitizeApproverName(approver.displayName),
-                    BadgeNumber: approver.badgeNumber || "",
-                    ChecklistDate: p.checklistDate.toString(),
-                    CheckListName: p.checklistName.toString(),
-                    CheckListBadge: (p.checklistBadge || false).toString()
-                }));
-
-                const mapItem = approvalMap.find(m => m.Approver.Id === approver.id);
-                const authorizedApprovers = mapItem ? mapItem.AuthorizedApprovers : "";
-                const secretaries = mapItem ? mapItem.Secretaries : "";
-
-                return {
-                    userId: approver.id,
-                    displayNameApprover: approver.displayName,
-                    emailApprover: approver.email,
-                    badgeNumberApprover: approver.badgeNumber || "",
-                    authorizedApprovers: authorizedApprovers,
-                    secretaries: secretaries,
-                    Placeholder: placeholderPayload
-                };
-            });
-
-            // Title is already generated above
-            // Construct Full JSON
-            const payload = {
-                title: esinTitle,
-                requestor: {
-                    email: context.pageContext.user.email,
-                    displayName: context.pageContext.user.displayName,
-                },
-                hashHex: hashHex,
-                fileRef: fileMetadata.fileRef,
-                status: "Processing",
-                ProcessSignature: processSignature
-            };
-
-            const jsonString = JSON.stringify(payload);
-            const emailString = approvers.map(a => a.email).join(';');
-
-            // Fetch Current User to get ID
+            // Fetch Current User to get ID (resolved once, passed into the helper)
             const currentUser = await spList.web.currentUser();
 
-            // Save to LIST_PROCESS list
-            await spList.web.lists.getByTitle(LIST_PROCESS).items.add({
-                Title: payload.title,
-                HashHex: payload.hashHex,
-                FileRef0: payload.fileRef,
-                RequestorId: currentUser.Id,
-                Status: payload.status,
-                ProcessData: jsonString,
-                UserNotif: emailString,
-                isDownloadable: reviewerCanDownload.toString()
+            // Single flow: call the shared helper with `batch` undefined so the LIST_PROCESS
+            // payload stays byte-for-byte identical (no BatchId/BatchMode written).
+            await createProcessForDocument({
+                fileRef: fileMetadata.fileRef,
+                fileBlob: fileBlob,
+                approvers: approvers,
+                placeholders: placeholders,
+                reviewerCanDownload: reviewerCanDownload,
+                embedQrCode: embedQrCode,
+                currentUserId: currentUser.Id,
+                spDoc: spDoc,
+                spList: spList
             });
-
-            // Save to LIST_ACTIVITY_LOG
-            await spList.web.lists.getByTitle(LIST_ACTIVITY_LOG).items.add({
-                Activity: "Initiated Signature Request",
-                UserIdId: currentUser.Id,
-                ProcessTitle: payload.title
-            });
-
 
             // alert("Workflow processing initiated successfully!");
             setHideDialog(false);
@@ -630,6 +860,97 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
             setIsSaving(false);
         }
     };
+
+    // Batch submit (FEAT-002): validate every document, then create one Approvals Process item per
+    // document, all sharing one BatchId with BatchMode='AllOrNothing'. The existing Power Automate
+    // flow triggers on item-created in LIST_PROCESS, so each created item fires its own initiate
+    // email automatically — no email code is added here.
+    const handleBatchSubmit = async (): Promise<void> => {
+        // Compose the authoritative document list by folding the live editing state into the active
+        // document (the write-back effect is async and may not have flushed the latest keystroke).
+        const docs = batchDocs.map((d, i) => i === activeDocIndex
+            ? { ...d, approvers, placeholders, reviewerCanDownload, embedQrCode }
+            : d);
+
+        // Validation: every document must have loaded, have >=1 approver, and every approver in a
+        // document must have >=1 placeholder box (same rule the single flow enforces).
+        for (let i = 0; i < docs.length; i++) {
+            const doc = docs[i];
+            if (!doc.loaded || !doc.blob) {
+                setBatchValidationMessage(`Document ${i + 1} ("${doc.fileName}") failed to load and cannot be submitted.`);
+                setActiveDocIndex(i);
+                return;
+            }
+            if (doc.approvers.length === 0) {
+                setBatchValidationMessage(`Document ${i + 1} ("${doc.fileName}") has no approver. Add at least one approver.`);
+                setActiveDocIndex(i);
+                return;
+            }
+            const missingBox = doc.approvers.some(a => !doc.placeholders.some(p => p.approverId === a.id));
+            if (missingBox) {
+                setBatchValidationMessage(`Document ${i + 1} ("${doc.fileName}") has an approver without a signature box. Add a box for every approver.`);
+                setActiveDocIndex(i);
+                return;
+            }
+        }
+
+        setBatchValidationMessage(null);
+        setIsSaving(true);
+
+        try {
+            const sourceUrl = sourcePage || context.pageContext.web.absoluteUrl;
+            const esignSiteUrl = `${TENANT_DOMAIN}/${SITES_ESIGN}`;
+
+            // SP for document operations (source site where the files live)
+            const spDoc: SPFI = getSP(context, sourceUrl);
+            // SP for list operations (eSign site where LIST_PROCESS and LIST_ACTIVITY_LOG live)
+            const spList: SPFI = getSP(context, esignSiteUrl);
+
+            // Resolve current user once and share across every document in the batch.
+            const currentUser = await spList.web.currentUser();
+
+            // One BatchId for the whole batch; AllOrNothing is the only supported mode today.
+            const batchId = generateBatchId();
+            const batchMode = "AllOrNothing";
+
+            // Create one item per document. If a document's creation throws mid-loop we surface the
+            // error and stop. NOTE: distributed rollback of already-created items is OUT OF SCOPE —
+            // the all-or-nothing enforcement happens in the approval flow (a reject fails the batch),
+            // not by deleting Process items here.
+            for (let i = 0; i < docs.length; i++) {
+                const doc = docs[i];
+                try {
+                    await createProcessForDocument({
+                        fileRef: doc.fileRef,
+                        fileBlob: doc.blob as Blob,
+                        approvers: doc.approvers,
+                        placeholders: doc.placeholders,
+                        reviewerCanDownload: doc.reviewerCanDownload,
+                        embedQrCode: doc.embedQrCode,
+                        currentUserId: currentUser.Id,
+                        spDoc: spDoc,
+                        spList: spList,
+                        batch: { batchId, batchMode }
+                    });
+                } catch (docErr) {
+                    console.error(`[InitiateSignature] Batch creation failed on document ${i + 1} (${doc.fileRef})`, docErr);
+                    setBatchValidationMessage(`Batch failed while creating document ${i + 1} ("${doc.fileName}"). ${i} document(s) were already created and are NOT rolled back. Check the console.`);
+                    return;
+                }
+            }
+
+            setHideDialog(true);
+            setHideErrorDialog(true);
+            setBatchDialogVisible(true);
+        } catch (err) {
+            console.error("Error processing batch workflow:", err);
+            alert("Error processing batch workflow. Check console.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const activeDoc = isBatchMode ? batchDocs[activeDocIndex] : undefined;
 
     return (
         <TouchDragProvider>
@@ -678,6 +999,33 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
 
                     {!loading && !fileUrl && <div className="p-4 alert alert-warning m-4">No file loaded. Check URL parameters.</div>}
 
+                    {/* Batch navigation: lets the requestor switch between the N documents, each
+                        configured independently. Rendered only in batch mode. */}
+                    {isBatchMode && batchDocs.length > 0 && (
+                        <div className="p-2 border-bottom bg-white sticky-top shadow-sm d-flex flex-wrap align-items-center" style={{ zIndex: 10, gap: 6 }}>
+                            <span className="text-muted me-2" style={{ fontSize: 12 }}>
+                                Batch ({batchDocs.length} documents) — configuring {activeDocIndex + 1}
+                            </span>
+                            {batchDocs.map((d, i) => {
+                                const complete = d.loaded && d.approvers.length > 0 &&
+                                    d.approvers.every(a => d.placeholders.some(p => p.approverId === a.id));
+                                const isActive = i === activeDocIndex;
+                                return (
+                                    <button
+                                        key={d.fileRef}
+                                        type="button"
+                                        onClick={() => setActiveDocIndex(i)}
+                                        title={d.fileName}
+                                        className={`btn btn-sm ${isActive ? 'btn-primary' : (complete ? 'btn-success' : 'btn-outline-secondary')}`}
+                                        style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                    >
+                                        {i + 1}. {d.fileName}{complete ? ' ✓' : ''}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+
                     {fileUrl && (
                         <>
                             <div className="p-3 border-bottom bg-white sticky-top shadow-sm" style={{ zIndex: 9 }}>
@@ -706,7 +1054,7 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                         placeholders={placeholders}
                         onApproversChange={setApprovers}
                         onRemoveApprover={handleRemoveApprover}
-                        onSave={handleSaveWorkflow}
+                        onSave={isBatchMode ? handleBatchSubmit : handleSaveWorkflow}
                         isSaving={isSaving}
                         fileLoaded={!!fileUrl}
                         validationTriggered={validationTriggered}
@@ -806,6 +1154,58 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                                 }
                             }
                         }} text="OK" />
+                    </DialogFooter>
+                </Dialog>
+
+                {/* Batch Success Dialog */}
+                <Dialog
+                    hidden={!batchDialogVisible}
+                    onDismiss={() => {
+                        if (activeDoc && activeDoc.fileRef) {
+                            const redirectUrl = getEncodedFolderUrl(activeDoc.fileRef, window.location.origin);
+                            if (redirectUrl) {
+                                window.location.href = redirectUrl;
+                            }
+                        }
+                    }}
+                    dialogContentProps={{
+                        type: DialogType.normal,
+                        title: 'Success',
+                        subText: `Batch of ${batchDocs.length} document(s) initiated successfully!`
+                    }}
+                    modalProps={{
+                        isBlocking: true,
+                        styles: { main: { maxWidth: 450 } }
+                    }}
+                >
+                    <DialogFooter>
+                        <PrimaryButton onClick={() => {
+                            if (activeDoc && activeDoc.fileRef) {
+                                const redirectUrl = getEncodedFolderUrl(activeDoc.fileRef, window.location.origin);
+                                if (redirectUrl) {
+                                    window.location.href = redirectUrl;
+                                }
+                            }
+                        }} text="OK" />
+                    </DialogFooter>
+                </Dialog>
+
+                {/* Batch Validation / Error Dialog */}
+                <Dialog
+                    hidden={!batchValidationMessage}
+                    onDismiss={() => setBatchValidationMessage(null)}
+                    dialogContentProps={{
+                        type: DialogType.normal,
+                        title: 'Batch Incomplete',
+                        subText: batchValidationMessage || ''
+                    }}
+                    modalProps={{
+                        isBlocking: false,
+                        styles: { main: { maxWidth: 450 } }
+                    }}
+                >
+                    <DialogFooter>
+                        <PrimaryButton onClick={() => setBatchValidationMessage(null)} text="OK" />
                     </DialogFooter>
                 </Dialog>
             </div>
