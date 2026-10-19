@@ -33,3 +33,6 @@ obj
 
 # Styles Generated Code
 *.scss.ts
+
+# Agent workflow artifacts (plans, reviews, task metadata)
+.agents/
