@@ -14,6 +14,9 @@ import { ApprovalService, IApprovalMapItem } from '../../../common/services/Appr
 import { generatePDFHash } from '../../../common/utils/HashHelper';
 import { PDFDocument, rgb } from 'pdf-lib';
 import { generateQrCodeImageBytes } from '../../../common/utils/QrCodeHelper';
+import { PdfUtils } from '../../../common/utils/PdfUtils';
+import { IGridBox, ITextAnnotation } from '../../../common/models/IEsignState';
+import { DEFAULT_GRID_BOX_CELLS, DEFAULT_GRID_BOX_TITLE } from '../../../common/utils/GridBoxLayout';
 import "bootstrap/dist/css/bootstrap.min.css";
 import { sanitizeApproverName, getEncodedFolderUrl } from '../../../common/utils/helper';
 import { Dialog, DialogType, DialogFooter, PrimaryButton } from '@fluentui/react';
@@ -24,12 +27,16 @@ import { LIST_PROCESS, LIST_ACTIVITY_LOG, TENANT_DOMAIN, SITES_ESIGN, SITE_REDIR
  * the single-document save and the batch loop. When `batch` is omitted the created Approvals
  * Process item is identical to the original single-flow item (no BatchId/BatchMode). When `batch`
  * is supplied, every item in the batch shares one batchId and BatchMode='AllOrNothing'.
+ * The embedding step also draws any supplied grid boxes and free texts into the PDF (in addition
+ * to the optional QR code) before hashing and overwriting the SharePoint file.
  */
 interface ICreateProcessParams {
     fileRef: string;
     fileBlob: Blob;
     approvers: IApprover[];
     placeholders: ISignaturePlaceholder[];
+    gridBoxes: IGridBox[];
+    texts: ITextAnnotation[];
     reviewerCanDownload: boolean;
     embedQrCode: boolean;
     currentUserId: number;
@@ -85,6 +92,10 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
     const [approvers, setApprovers] = useState<IApprover[]>([]);
     const [approvalMap, setApprovalMap] = useState<IApprovalMapItem[]>([]);
     const [placeholders, setPlaceholders] = useState<ISignaturePlaceholder[]>([]);
+    const [gridBoxes, setGridBoxes] = useState<IGridBox[]>([]);
+    const [texts, setTexts] = useState<ITextAnnotation[]>([]);
+    // Grid box or text being edited in the sidebar
+    const [selectedId, setSelectedId] = useState<string | null>(null);
     const [placementMode, setPlacementMode] = useState<'current' | 'all' | 'range'>('current');
     const [numPages, setNumPages] = useState<number>(0);
     const [visiblePage, setVisiblePage] = useState<number>(1); // Page the user is looking at
@@ -606,6 +617,71 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
             });
         };
 
+    // Page in view, used to place new grid boxes and texts
+    const getTargetPage = (): number => Math.min(Math.max(visiblePage, 1), numPages || 1);
+
+    // Optional grid box: added on the page in view, burned into the PDF on Process Workflow
+    const addGridBox = (): void => {
+        const id = `grid-${Date.now()}-${Math.random()}`;
+        const width = 32;
+        const height = 25;
+
+        setGridBoxes(prev => [
+            ...prev,
+            {
+                id,
+                page: getTargetPage(),
+                x: (100 - width) / 2,
+                y: (100 - height) / 2,
+                width,
+                height,
+                rows: 2,
+                cols: 2,
+                title: DEFAULT_GRID_BOX_TITLE,
+                fillIns: ['', '', ''],
+                cells: DEFAULT_GRID_BOX_CELLS.map(c => ({ ...c }))
+            }
+        ]);
+        setSelectedId(id);
+    };
+
+    const updateGridBox = (id: string, updates: Partial<IGridBox>): void => {
+        setGridBoxes(prev => prev.map(b => b.id === id ? { ...b, ...updates } : b));
+    };
+
+    const removeGridBox = (id: string): void => {
+        setGridBoxes(prev => prev.filter(b => b.id !== id));
+        if (selectedId === id) setSelectedId(null);
+    };
+
+    // Optional free text: added on the page in view, burned into the PDF on Process Workflow
+    const addText = (): void => {
+        const id = `text-${Date.now()}-${Math.random()}`;
+
+        setTexts(prev => [
+            ...prev,
+            {
+                id,
+                page: getTargetPage(),
+                x: 40,
+                y: 45,
+                text: '',
+                color: '#000000',
+                size: 2 // % of page width (~12pt on A4 portrait)
+            }
+        ]);
+        setSelectedId(id);
+    };
+
+    const updateText = (id: string, updates: Partial<ITextAnnotation>): void => {
+        setTexts(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    };
+
+    const removeText = (id: string): void => {
+        setTexts(prev => prev.filter(t => t.id !== id));
+        if (selectedId === id) setSelectedId(null);
+    };
+
     const removePlaceholder = (id: string): void => {
         setPlaceholders(placeholders.filter(p => p.id !== id));
     };
@@ -630,7 +706,7 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
     // When `params.batch` is undefined the LIST_PROCESS payload is byte-for-byte identical to the
     // original single-document save; when provided it ALSO stamps BatchId/BatchMode on the item.
     const createProcessForDocument = async (params: ICreateProcessParams): Promise<void> => {
-        const { fileRef: docFileRef, fileBlob: docBlob, approvers: docApprovers, placeholders: docPlaceholders, reviewerCanDownload: docReviewerCanDownload, embedQrCode: docEmbedQrCode, currentUserId, spDoc, spList, batch } = params;
+        const { fileRef: docFileRef, fileBlob: docBlob, approvers: docApprovers, placeholders: docPlaceholders, gridBoxes: docGridBoxes, texts: docTexts, reviewerCanDownload: docReviewerCanDownload, embedQrCode: docEmbedQrCode, currentUserId, spDoc, spList, batch } = params;
 
         // Generate Title ESIN-ddmmyy
         const now = new Date();
@@ -643,56 +719,63 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
         const randomSuffix = Math.random().toString(36).substring(2, 5).toUpperCase();
         const esinTitle = `REQ-ESIGN-${day}${month}${year}${hours}${minutes}${seconds}${randomSuffix}`;
 
-        // Embed Barcode Logic Start 
+        // Embed Grid Boxes, Texts & Barcode Logic Start
         let finalBlobToHash = docBlob;
-        if (docEmbedQrCode) {
+        const docTextsToDraw = docTexts.filter(t => t.text.trim());
+        if (docEmbedQrCode || docGridBoxes.length > 0 || docTextsToDraw.length > 0) {
             try {
-                const qrContent = `${TENANT_DOMAIN}/${SITE_REDIRECT}/SitePages/Document-Tracker.aspx?code=${esinTitle}`;
-                const qrImageBytes = await generateQrCodeImageBytes(qrContent);
-
-                // 2. Manipulate PDF
+                // 1. Load PDF
                 const arrayBuffer = await docBlob.arrayBuffer();
                 const pdfDoc = await PDFDocument.load(arrayBuffer);
-                const pngImage = await pdfDoc.embedPng(qrImageBytes);
 
-                // 3. Draw on the last page bottom-right, sized as 12% of the smaller page dimension
-                const pages = pdfDoc.getPages();
+                // 2. Draw optional grid boxes and free texts (no-ops when arrays are empty)
+                await PdfUtils.drawGridBoxes(pdfDoc, docGridBoxes);
+                await PdfUtils.drawFreeTexts(pdfDoc, docTextsToDraw);
 
-                if (pages.length > 0) {
-                    const lastPage = pages[pages.length - 1];
-                    const { width: pageWidth, height: pageHeight } = lastPage.getSize();
+                if (docEmbedQrCode) {
+                    const qrContent = `${TENANT_DOMAIN}/${SITE_REDIRECT}/SitePages/Document-Tracker.aspx?code=${esinTitle}`;
+                    const qrImageBytes = await generateQrCodeImageBytes(qrContent);
+                    const pngImage = await pdfDoc.embedPng(qrImageBytes);
 
-                    // Determine if page is portrait or landscape
-                    const isPortrait = pageHeight > pageWidth;
-                    // Size: 14% for portrait, 16% for landscape
-                    const sizeFactor = isPortrait ? 0.12 : 0.16;
+                    // 3. Draw on the last page bottom-right, sized as 12% of the smaller page dimension
+                    const pages = pdfDoc.getPages();
 
-                    const qrSize = Math.min(pageWidth, pageHeight) * sizeFactor;
-                    const padding = 2;
+                    if (pages.length > 0) {
+                        const lastPage = pages[pages.length - 1];
+                        const { width: pageWidth, height: pageHeight } = lastPage.getSize();
 
-                    // Position bottom-right with a margin
-                    const marginX = 15;
-                    const marginY = 15;
-                    const qrX = pageWidth - qrSize - marginX;
-                    const qrY = marginY;
+                        // Determine if page is portrait or landscape
+                        const isPortrait = pageHeight > pageWidth;
+                        // Size: 14% for portrait, 16% for landscape
+                        const sizeFactor = isPortrait ? 0.12 : 0.16;
 
-                    // Draw white background rectangle behind QR code
-                    lastPage.drawRectangle({
-                        x: qrX - padding,
-                        y: qrY - padding,
-                        width: qrSize + padding * 2,
-                        height: qrSize + padding * 2,
-                        color: rgb(1, 1, 1),
-                        borderWidth: 0,
-                    });
-                    // Draw QR code on top
-                    lastPage.drawImage(pngImage, {
-                        x: qrX,
-                        y: qrY,
-                        width: qrSize,
-                        height: qrSize,
-                    });
-                }
+                        const qrSize = Math.min(pageWidth, pageHeight) * sizeFactor;
+                        const padding = 2;
+
+                        // Position bottom-right with a margin
+                        const marginX = 15;
+                        const marginY = 15;
+                        const qrX = pageWidth - qrSize - marginX;
+                        const qrY = marginY;
+
+                        // Draw white background rectangle behind QR code
+                        lastPage.drawRectangle({
+                            x: qrX - padding,
+                            y: qrY - padding,
+                            width: qrSize + padding * 2,
+                            height: qrSize + padding * 2,
+                            color: rgb(1, 1, 1),
+                            borderWidth: 0,
+                        });
+                        // Draw QR code on top
+                        lastPage.drawImage(pngImage, {
+                            x: qrX,
+                            y: qrY,
+                            width: qrSize,
+                            height: qrSize,
+                        });
+                    }
+                } // end if embedQrCode
 
                 // 4. Save and Overwrite SharePoint File
                 const modifiedPdfBytes = await pdfDoc.save();
@@ -704,12 +787,12 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                     progress: (data) => console.log("Upload progress:", data.stage, data.offset)
                 });
 
-            } catch (qrError) {
-                console.error("Failed to embed QR code", qrError);
-                throw qrError; // Rethrow to halt the actual processing and show normal error log
+            } catch (embedError) {
+                console.error("Failed to embed grid boxes / texts / QR code", embedError);
+                throw embedError; // Rethrow to halt the actual processing and show normal error log
             }
-        } // end if embedQrCode
-        // Embed Barcode Logic End
+        }
+        // Embed Grid Boxes, Texts & Barcode Logic End
 
         // Generate Hash from modified (or original) PDF
         const hashHex = await generatePDFHash(finalBlobToHash);
@@ -831,12 +914,16 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
             const currentUser = await spList.web.currentUser();
 
             // Single flow: call the shared helper with `batch` undefined so the LIST_PROCESS
-            // payload stays byte-for-byte identical (no BatchId/BatchMode written).
+            // payload stays byte-for-byte identical (no BatchId/BatchMode written). The
+            // component-level grid boxes/texts are threaded in so the helper embeds them exactly
+            // as the standalone GridBox flow did.
             await createProcessForDocument({
                 fileRef: fileMetadata.fileRef,
                 fileBlob: fileBlob,
                 approvers: approvers,
                 placeholders: placeholders,
+                gridBoxes: gridBoxes,
+                texts: texts,
                 reviewerCanDownload: reviewerCanDownload,
                 embedQrCode: embedQrCode,
                 currentUserId: currentUser.Id,
@@ -925,6 +1012,11 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                         fileBlob: doc.blob as Blob,
                         approvers: doc.approvers,
                         placeholders: doc.placeholders,
+                        // Batch documents do not track per-document grid boxes / free texts
+                        // (IBatchDocument has no such fields), so none are embedded for batch items.
+                        // Pass empty arrays to satisfy the helper.
+                        gridBoxes: [],
+                        texts: [],
                         reviewerCanDownload: doc.reviewerCanDownload,
                         embedQrCode: doc.embedQrCode,
                         currentUserId: currentUser.Id,
@@ -1038,6 +1130,14 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                                 onDrop={handleSignatureDrop}
                                 onUpdatePlaceholder={updatePlaceholder}
                                 onRemovePlaceholder={removePlaceholder}
+                                gridBoxes={gridBoxes}
+                                onUpdateGridBox={updateGridBox}
+                                onRemoveGridBox={removeGridBox}
+                                texts={texts}
+                                onUpdateText={updateText}
+                                onRemoveText={removeText}
+                                selectedId={selectedId}
+                                onSelect={setSelectedId}
                                 onDocumentLoaded={setNumPages}
                                 onVisiblePageChange={setVisiblePage}
                             />
@@ -1068,6 +1168,15 @@ const InitiateSignature: React.FC<IInitiateSignatureProps> = (props) => {
                         numPages={numPages}
                         visiblePage={visiblePage}
                         onPlaceAtCenter={placeAtCenter}
+                        gridBoxes={gridBoxes}
+                        onAddGridBox={addGridBox}
+                        onUpdateGridBox={updateGridBox}
+                        onClearGridBoxes={() => setGridBoxes([])}
+                        texts={texts}
+                        onAddText={addText}
+                        onUpdateText={updateText}
+                        onClearTexts={() => setTexts([])}
+                        selectedId={selectedId}
                     />
                 </div>
 

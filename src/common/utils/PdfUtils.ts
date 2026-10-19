@@ -1,5 +1,10 @@
-import { PDFDocument, rgb, degrees, PDFPage, BlendMode } from 'pdf-lib';
-import { IPathAnnotation, ISignaturePlaceholder, ITextAnnotation } from '../models/IEsignState';
+import { PDFDocument, rgb, degrees, PDFPage, BlendMode, StandardFonts, PDFFont, RGB } from 'pdf-lib';
+import { IGridBox, IPathAnnotation, ISignaturePlaceholder, ITextAnnotation } from '../models/IEsignState';
+import { GRID_BOX_COLORS, computeGridBoxLayout, dotLeader, fitTextSize, toWinAnsiText } from './GridBoxLayout';
+
+/** Free text: CSS line-height used by the preview, and where the first baseline sits below the top (in em) */
+export const FREE_TEXT_LINE_HEIGHT = 1.2;
+export const FREE_TEXT_BASELINE = 0.94;
 
 export class PdfUtils {
 
@@ -214,6 +219,183 @@ export class PdfUtils {
         const pdfBytes = await pdfDoc.save();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return new Blob([pdfBytes as any], { type: 'application/pdf' });
+    }
+
+    /**
+     * Draws grid boxes (approval stamp: transparent background, title, header bands, cells, labels)
+     * into an already loaded PDF. Layout is shared with the on-screen preview (GridBoxLayout).
+     * Box coordinates are percentages (0-100) of the visual page, so rotated pages are handled.
+     */
+    public static async drawGridBoxes(pdfDoc: PDFDocument, boxes: IGridBox[]): Promise<void> {
+        if (boxes.length === 0) return;
+
+        const pages = pdfDoc.getPages();
+        const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        const measure = (text: string, size: number): number => font.widthOfTextAtSize(text, size);
+
+        const band = this._hexToRgb(GRID_BOX_COLORS.band);
+        const lineColor = this._hexToRgb(GRID_BOX_COLORS.line);
+        const textColor = this._hexToRgb(GRID_BOX_COLORS.text);
+        const titleColor = this._hexToRgb(GRID_BOX_COLORS.title);
+
+        boxes.forEach(b => {
+            if (b.page < 1 || b.page > pages.length) return;
+            const page = pages[b.page - 1];
+            const { visualWidth, visualHeight } = this._getVisualSize(page);
+
+            // Box in visual points (origin top-left of the page)
+            const bx = (b.x / 100) * visualWidth;
+            const by = (b.y / 100) * visualHeight;
+            const bw = (b.width / 100) * visualWidth;
+            const bh = (b.height / 100) * visualHeight;
+            const L = computeGridBoxLayout(bw, bh, b.rows, b.cols);
+
+            // Helpers taking coordinates relative to the box's top-left corner
+            const rect = (x: number, y: number, w: number, h: number, color: RGB): void => {
+                this._drawVisualRect(page, bx + x, by + y, w, h, color);
+            };
+            const line = (x1: number, y1: number, x2: number, y2: number): void => {
+                page.drawLine({
+                    start: this._transformCoordinate((bx + x1) / visualWidth, (by + y1) / visualHeight, page),
+                    end: this._transformCoordinate((bx + x2) / visualWidth, (by + y2) / visualHeight, page),
+                    thickness: L.lineWidth,
+                    color: lineColor
+                });
+            };
+            const text = (str: string, x: number, baseline: number, size: number, color: RGB): void => {
+                this._drawVisualText(page, str, bx + x, by + baseline, size, font, color);
+            };
+            const centeredText = (str: string, left: number, width: number, baseline: number): void => {
+                const clean = toWinAnsiText(str.trim());
+                if (!clean) return;
+                const size = fitTextSize(clean, width - L.padX * 2, L.textSize, measure);
+                text(clean, left + (width - measure(clean, size)) / 2, baseline, size, textColor);
+            };
+
+            // 1. Header bands (no background fill, so the document stays visible behind the box)
+            L.rows.forEach(r => rect(0, r.top, bw, r.headerH, band));
+
+            // 2. Frame
+            line(0, 0, bw, 0);
+            line(0, 0, 0, bh);
+            line(bw, 0, bw, bh);
+            line(0, bh, bw, bh);
+
+            // 3. Header band borders & column dividers
+            L.rows.forEach(r => {
+                line(0, r.top, bw, r.top);
+                line(0, r.top + r.headerH, bw, r.top + r.headerH);
+                for (let c = 1; c < b.cols; c++) {
+                    line(L.colW * c, r.top + r.headerH, L.colW * c, r.bottom);
+                }
+            });
+
+            // 4. Title area: typed dots with optional fill-in values, and red title
+            L.dotLines.forEach(([x1, x2], i) => {
+                text(dotLeader(x2 - x1, L.textSize, measure), x1, L.dotY, L.textSize, textColor);
+
+                const value = toWinAnsiText((b.fillIns?.[i] || '').trim());
+                if (value) {
+                    const size = fitTextSize(value, x2 - x1, L.textSize * 0.9, measure);
+                    text(value, x1 + (x2 - x1 - measure(value, size)) / 2, L.dotY - L.textSize * 0.3, size, textColor);
+                }
+            });
+            text(':', L.colonX - measure(':', L.textSize) / 2, L.dotY, L.textSize, textColor);
+
+            const title = toWinAnsiText(b.title.trim());
+            if (title) {
+                const titleSize = fitTextSize(title, bw * 0.6, L.titleSize, measure);
+                text(title, bw - L.padX - measure(title, titleSize), L.titleBaseline, titleSize, titleColor);
+            }
+
+            // 5. Cell labels
+            L.rows.forEach((r, ri) => {
+                for (let c = 0; c < b.cols; c++) {
+                    const cell = b.cells[ri * b.cols + c];
+                    if (!cell) continue;
+                    centeredText(cell.header, L.colW * c, L.colW, r.top + r.headerH * 0.72);
+                    centeredText(cell.footer, L.colW * c, L.colW, r.bottom - r.headerH * 0.35);
+                }
+            });
+        });
+    }
+
+    /**
+     * Draws free text added by the requestor into an already loaded PDF.
+     * t.x / t.y are percentages (0-100) of the visual page (top-left of the text),
+     * t.size is a percentage of the visual page width.
+     */
+    public static async drawFreeTexts(pdfDoc: PDFDocument, texts: ITextAnnotation[]): Promise<void> {
+        const visibleTexts = texts.filter(t => t.text.trim());
+        if (visibleTexts.length === 0) return;
+
+        const pages = pdfDoc.getPages();
+        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+        visibleTexts.forEach(t => {
+            if (t.page < 1 || t.page > pages.length) return;
+            const page = pages[t.page - 1];
+            const { visualWidth, visualHeight } = this._getVisualSize(page);
+            const size = (t.size / 100) * visualWidth;
+
+            this._drawVisualText(
+                page,
+                toWinAnsiText(t.text),
+                (t.x / 100) * visualWidth,
+                (t.y / 100) * visualHeight + size * FREE_TEXT_BASELINE,
+                size,
+                font,
+                this._hexToRgb(t.color),
+                size * FREE_TEXT_LINE_HEIGHT
+            );
+        });
+    }
+
+    /** Page size as the user sees it (width/height swapped for 90/270 rotation) */
+    private static _getVisualSize(page: PDFPage): { visualWidth: number; visualHeight: number } {
+        const { width, height } = page.getCropBox() ?? page.getMediaBox();
+        const rotation = page.getRotation().angle;
+        return rotation === 90 || rotation === 270
+            ? { visualWidth: height, visualHeight: width }
+            : { visualWidth: width, visualHeight: height };
+    }
+
+    /** Filled rectangle given in visual points (top-left origin), rotated with the page */
+    private static _drawVisualRect(page: PDFPage, x: number, y: number, w: number, h: number, color: RGB): void {
+        const { visualWidth, visualHeight } = this._getVisualSize(page);
+        // Anchor is the visual bottom-left corner; rotating by the page rotation keeps it upright (same as signatures)
+        const anchor = this._transformCoordinate(x / visualWidth, (y + h) / visualHeight, page);
+        page.drawRectangle({
+            x: anchor.x,
+            y: anchor.y,
+            width: w,
+            height: h,
+            color,
+            borderWidth: 0,
+            rotate: degrees(page.getRotation().angle)
+        });
+    }
+
+    /** Text given in visual points (x = left, y = baseline), rotated with the page */
+    private static _drawVisualText(page: PDFPage, text: string, x: number, baseline: number, size: number, font: PDFFont, color: RGB, lineHeight?: number): void {
+        const { visualWidth, visualHeight } = this._getVisualSize(page);
+        const anchor = this._transformCoordinate(x / visualWidth, baseline / visualHeight, page);
+        page.drawText(text, {
+            x: anchor.x,
+            y: anchor.y,
+            size,
+            font,
+            color,
+            lineHeight,
+            rotate: degrees(page.getRotation().angle)
+        });
+    }
+
+    private static _hexToRgb(hex: string): RGB {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result
+            ? rgb(parseInt(result[1], 16) / 255, parseInt(result[2], 16) / 255, parseInt(result[3], 16) / 255)
+            : rgb(0, 0, 0);
     }
 
     /**

@@ -5,6 +5,9 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { sanitizeApproverName, formatBadgeNumber } from '../../../common/utils/helper';
 import { useTouchDrag } from './TouchDragContext';
+import { IGridBox, ITextAnnotation } from '../../../common/models/IEsignState';
+import { FREE_TEXT_LINE_HEIGHT } from '../../../common/utils/PdfUtils';
+import GridBoxPreview from './GridBoxPreview';
 
 // Worker Setup - Create Blob URL from bundled worker content
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -27,6 +30,15 @@ export interface ISignaturePlaceholder {
   groupId?: string;
 }
 
+/** Position and size (in %) shared by signature placeholders and grid boxes */
+type IBoxRect = Pick<ISignaturePlaceholder, 'x' | 'y' | 'width' | 'height'> & { size?: number };
+
+// Free text size limits (% of page width), ~4pt to ~96pt on A4 portrait
+const MIN_TEXT_SIZE = (4 / 595) * 100;
+const MAX_TEXT_SIZE = (96 / 595) * 100;
+
+type InteractionKind = 'placeholder' | 'grid' | 'text';
+
 interface IPdfViewerProps {
   fileUrl: string;
   placeholders: ISignaturePlaceholder[];
@@ -34,6 +46,15 @@ interface IPdfViewerProps {
   onDrop: (page: number, x: number, y: number, approverId: number, type: 'initial' | 'signature', checklistName: boolean, checklistDate: boolean, checklistBadge: boolean, widthPercent?: number, heightPercent?: number) => void;
   onUpdatePlaceholder: (id: string, updates: Partial<ISignaturePlaceholder>) => void;
   onRemovePlaceholder: (id: string) => void;
+  gridBoxes: IGridBox[];
+  onUpdateGridBox: (id: string, updates: Partial<IGridBox>) => void;
+  onRemoveGridBox: (id: string) => void;
+  texts: ITextAnnotation[];
+  onUpdateText: (id: string, updates: Partial<ITextAnnotation>) => void;
+  onRemoveText: (id: string) => void;
+  /** Grid box or text currently being edited in the sidebar */
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
   onDocumentLoaded?: (numPages: number) => void;
   /** Called with the page that takes up most of the screen while the user scrolls */
   onVisiblePageChange?: (page: number) => void;
@@ -46,6 +67,14 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
   onDrop,
   onUpdatePlaceholder,
   onRemovePlaceholder,
+  gridBoxes,
+  onUpdateGridBox,
+  onRemoveGridBox,
+  texts,
+  onUpdateText,
+  onRemoveText,
+  selectedId,
+  onSelect,
   onDocumentLoaded,
   onVisiblePageChange
 }) => {
@@ -91,8 +120,9 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
   // Interaction State
   const [interactingId, setInteractingId] = useState<string | null>(null);
   const [interactionType, setInteractionType] = useState<'move' | 'resize' | null>(null);
+  const [interactingKind, setInteractingKind] = useState<InteractionKind>('placeholder');
   // Store initial state for delta calculation
-  const [startState, setStartState] = useState<{ xPx: number, yPx: number, wPx: number, hPx: number, mouseX: number, mouseY: number, parentW: number, parentH: number } | null>(null);
+  const [startState, setStartState] = useState<{ xPx: number, yPx: number, wPx: number, hPx: number, mouseX: number, mouseY: number, parentW: number, parentH: number, size?: number } | null>(null);
 
   // Touch drag context for mobile support
   const { dragData, setDragData, isDragging, setIsDragging } = useTouchDrag();
@@ -115,11 +145,11 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
   }, []);
 
   useEffect(() => {
-    const handleWindowMouseMove = (e: MouseEvent): void => {
+    // Shared move/resize logic for mouse and touch, for both signature placeholders and grid boxes
+    const applyDelta = (deltaX: number, deltaY: number): void => {
       if (!interactingId || !startState || !interactionType) return;
 
-      const deltaX = e.clientX - startState.mouseX;
-      const deltaY = e.clientY - startState.mouseY;
+      const onUpdate = interactingKind === 'grid' ? onUpdateGridBox : (interactingKind === 'text' ? onUpdateText : onUpdatePlaceholder);
 
       if (interactionType === 'move') {
         let newXPx = startState.xPx + deltaX;
@@ -130,76 +160,65 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
         newYPx = Math.max(0, Math.min(newYPx, startState.parentH - startState.hPx));
 
         // Convert back to %
-        const newXPercent = (newXPx / startState.parentW) * 100;
-        const newYPercent = (newYPx / startState.parentH) * 100;
-
-        onUpdatePlaceholder(interactingId, {
-          x: newXPercent,
-          y: newYPercent
+        onUpdate(interactingId, {
+          x: (newXPx / startState.parentW) * 100,
+          y: (newYPx / startState.parentH) * 100
         });
-      } else if (interactionType === 'resize') {
-        const rawNewWidthPx = Math.max(50, startState.wPx + deltaX);
-
-        // Calculate max available dimensions in Px
-        const maxWPx = startState.parentW - startState.xPx;
-        const maxHPx = startState.parentH - startState.yPx;
-
-        // Constrain width by available width AND available height (taking 3:2 ratio)
-        // Height = Width / 1.5
-        // Width <= maxHPx * 1.5
-        const constrainedWidthPx = Math.min(rawNewWidthPx, maxWPx, maxHPx * 1.5);
-
-        const newHeightPx = constrainedWidthPx / 1.5;
-
-        // Convert back to %
-        const newWPercent = (constrainedWidthPx / startState.parentW) * 100;
-        const newHPercent = (newHeightPx / startState.parentH) * 100;
-
-        onUpdatePlaceholder(interactingId, {
-          width: newWPercent,
-          height: newHPercent
-        });
+        return;
       }
+
+      // Calculate max available dimensions in Px
+      const maxWPx = startState.parentW - startState.xPx;
+      const maxHPx = startState.parentH - startState.yPx;
+
+      if (interactingKind === 'text') {
+        // Text resizes by scaling its font size with the dragged width
+        if (!startState.size || startState.wPx <= 0) return;
+        const newWidthPx = Math.min(Math.max(10, startState.wPx + deltaX), maxWPx);
+        const newSize = startState.size * (newWidthPx / startState.wPx);
+
+        onUpdateText(interactingId, { size: Math.min(MAX_TEXT_SIZE, Math.max(MIN_TEXT_SIZE, newSize)) });
+        return;
+      }
+
+      if (interactingKind === 'grid') {
+        // Grid boxes resize freely (no fixed aspect ratio)
+        const newWidthPx = Math.min(Math.max(30, startState.wPx + deltaX), maxWPx);
+        const newHeightPx = Math.min(Math.max(20, startState.hPx + deltaY), maxHPx);
+
+        onUpdateGridBox(interactingId, {
+          width: (newWidthPx / startState.parentW) * 100,
+          height: (newHeightPx / startState.parentH) * 100
+        });
+        return;
+      }
+
+      const rawNewWidthPx = Math.max(50, startState.wPx + deltaX);
+
+      // Constrain width by available width AND available height (taking 3:2 ratio)
+      // Height = Width / 1.5
+      // Width <= maxHPx * 1.5
+      const constrainedWidthPx = Math.min(rawNewWidthPx, maxWPx, maxHPx * 1.5);
+      const newHeightPx = constrainedWidthPx / 1.5;
+
+      onUpdatePlaceholder(interactingId, {
+        width: (constrainedWidthPx / startState.parentW) * 100,
+        height: (newHeightPx / startState.parentH) * 100
+      });
+    };
+
+    const handleWindowMouseMove = (e: MouseEvent): void => {
+      if (!interactingId || !startState) return;
+      applyDelta(e.clientX - startState.mouseX, e.clientY - startState.mouseY);
     };
 
     // Touch move handler for mobile
     const handleWindowTouchMove = (e: TouchEvent): void => {
-      if (!interactingId || !startState || !interactionType) return;
+      if (!interactingId || !startState) return;
 
       e.preventDefault(); // Prevent scrolling while moving/resizing
       const touch = e.touches[0];
-      const deltaX = touch.clientX - startState.mouseX;
-      const deltaY = touch.clientY - startState.mouseY;
-
-      if (interactionType === 'move') {
-        let newXPx = startState.xPx + deltaX;
-        let newYPx = startState.yPx + deltaY;
-
-        newXPx = Math.max(0, Math.min(newXPx, startState.parentW - startState.wPx));
-        newYPx = Math.max(0, Math.min(newYPx, startState.parentH - startState.hPx));
-
-        const newXPercent = (newXPx / startState.parentW) * 100;
-        const newYPercent = (newYPx / startState.parentH) * 100;
-
-        onUpdatePlaceholder(interactingId, {
-          x: newXPercent,
-          y: newYPercent
-        });
-      } else if (interactionType === 'resize') {
-        const rawNewWidthPx = Math.max(50, startState.wPx + deltaX);
-        const maxWPx = startState.parentW - startState.xPx;
-        const maxHPx = startState.parentH - startState.yPx;
-        const constrainedWidthPx = Math.min(rawNewWidthPx, maxWPx, maxHPx * 1.5);
-        const newHeightPx = constrainedWidthPx / 1.5;
-
-        const newWPercent = (constrainedWidthPx / startState.parentW) * 100;
-        const newHPercent = (newHeightPx / startState.parentH) * 100;
-
-        onUpdatePlaceholder(interactingId, {
-          width: newWPercent,
-          height: newHPercent
-        });
-      }
+      applyDelta(touch.clientX - startState.mouseX, touch.clientY - startState.mouseY);
     };
 
     const handleWindowMouseUp = (): void => {
@@ -228,10 +247,10 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
       window.removeEventListener('touchmove', handleWindowTouchMove);
       window.removeEventListener('touchend', handleWindowTouchEnd);
     };
-  }, [interactingId, interactionType, startState, onUpdatePlaceholder]);
+  }, [interactingId, interactingKind, interactionType, startState, onUpdatePlaceholder, onUpdateGridBox, onUpdateText]);
 
 
-  const handleMouseDown = (e: React.MouseEvent, id: string, type: 'move' | 'resize', placeholder: ISignaturePlaceholder): void => {
+  const handleMouseDown = (e: React.MouseEvent, id: string, type: 'move' | 'resize', placeholder: IBoxRect, kind: InteractionKind = 'placeholder'): void => {
     e.stopPropagation(); // Prevent drag drop interference
     e.preventDefault();  // Prevent text selection or native drag
 
@@ -255,6 +274,8 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
     const hPx = (placeholder.height / 100) * parentH;
 
     setInteractingId(id);
+    setInteractingKind(kind);
+    if (kind !== 'placeholder') onSelect(id);
     setInteractionType(type);
     setStartState({
       xPx,
@@ -264,12 +285,13 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
       mouseX: e.clientX,
       mouseY: e.clientY,
       parentW,
-      parentH
+      parentH,
+      size: placeholder.size
     });
   };
 
   // Touch start handler for mobile move/resize
-  const handleTouchStart = (e: React.TouchEvent, id: string, type: 'move' | 'resize', placeholder: ISignaturePlaceholder): void => {
+  const handleTouchStart = (e: React.TouchEvent, id: string, type: 'move' | 'resize', placeholder: IBoxRect, kind: InteractionKind = 'placeholder'): void => {
     e.stopPropagation();
     // Don't preventDefault here to allow delete button to work
 
@@ -291,6 +313,8 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
     const hPx = (placeholder.height / 100) * parentH;
 
     setInteractingId(id);
+    setInteractingKind(kind);
+    if (kind !== 'placeholder') onSelect(id);
     setInteractionType(type);
     setStartState({
       xPx,
@@ -300,8 +324,16 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
       mouseX: touch.clientX,
       mouseY: touch.clientY,
       parentW,
-      parentH
+      parentH,
+      size: placeholder.size
     });
+  };
+
+  const getElementRect = (el: HTMLElement, t: ITextAnnotation): IBoxRect => {
+    const parent = el.parentElement;
+    const parentW = parent?.offsetWidth || 1;
+    const parentH = parent?.offsetHeight || 1;
+    return { x: t.x, y: t.y, width: (el.offsetWidth / parentW) * 100, height: (el.offsetHeight / parentH) * 100, size: t.size };
   };
 
   function onDocumentLoadSuccess({ numPages }: { numPages: number }): void {
@@ -415,6 +447,8 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
         {Array.from(new Array(numPages), (el, index) => {
           const pageNum = index + 1;
           const pagePlaceholders = placeholders.filter(p => p.page === pageNum);
+          const pageGridBoxes = gridBoxes.filter(b => b.page === pageNum);
+          const pageTexts = texts.filter(t => t.page === pageNum);
 
           return (
             <div
@@ -427,6 +461,7 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
               className={`mb-4 shadow position-relative bg-white ${isDragging ? 'touch-drop-active' : ''}`}
               onDrop={(e) => handleDrop(e, pageNum)}
               onDragOver={handleDragOver}
+              onMouseDown={() => onSelect(null)}
               onTouchEnd={(e) => handleTouchTap(e, pageNum)}
               style={{ width: pdfWrapperWidth, cursor: isDragging ? 'crosshair' : 'default' }}
             >
@@ -448,6 +483,103 @@ const PdfViewer: React.FC<IPdfViewerProps> = ({
             >
                 {pageNum} / {numPages}
             </div>
+
+              {/* Render Grid Boxes (burned into the PDF on Process Workflow) */}
+              {pageGridBoxes.map(b => {
+                const isSelected = selectedId === b.id;
+                return (
+                  <div
+                    key={b.id}
+                    className="position-absolute"
+                    style={{
+                      left: `${b.x}%`,
+                      top: `${b.y}%`,
+                      width: `${b.width}%`,
+                      height: `${b.height}%`,
+                      zIndex: 9,
+                      outline: `${isSelected ? 2 : 1}px dashed ${isSelected ? '#0d6efd' : 'rgba(108, 117, 125, 0.8)'}`,
+                      outlineOffset: 3,
+                      cursor: 'move',
+                      touchAction: 'none'
+                    }}
+                    onMouseDown={(e) => handleMouseDown(e, b.id, 'move', b, 'grid')}
+                    onTouchStart={(e) => handleTouchStart(e, b.id, 'move', b, 'grid')}
+                  >
+                    <GridBoxPreview box={b} />
+
+                    {/* Delete Button */}
+                    <div
+                      className="position-absolute bg-white rounded-circle shadow border d-flex align-items-center justify-content-center"
+                      style={{ top: -12, right: -12, width: 20, height: 20, fontSize: 12, color: 'red', zIndex: 20, cursor: 'pointer' }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
+                      onClick={(e) => { e.stopPropagation(); onRemoveGridBox(b.id); }}
+                      role="button"
+                      title="Remove"
+                    >×</div>
+
+                    {/* Resize Handle (Bottom Right) */}
+                    <div
+                      className="position-absolute d-flex align-items-end justify-content-end"
+                      style={{ right: 0, bottom: 0, width: 25, height: 25, cursor: 'se-resize', zIndex: 15, padding: '3px', touchAction: 'none' }}
+                      onMouseDown={(e) => handleMouseDown(e, b.id, 'resize', b, 'grid')}
+                      onTouchStart={(e) => handleTouchStart(e, b.id, 'resize', b, 'grid')}
+                    >
+                      <div style={{ width: 0, height: 0, borderBottom: '10px solid #6c757d', borderLeft: '10px solid transparent' }} />
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Render Free Texts (burned into the PDF on Process Workflow) */}
+              {pageTexts.map(t => {
+                const isSelected = selectedId === t.id;
+                return (
+                  <div
+                    key={t.id}
+                    className="position-absolute"
+                    style={{
+                      left: `${t.x}%`,
+                      top: `${t.y}%`,
+                      zIndex: 12,
+                      fontFamily: 'Helvetica, Arial, sans-serif',
+                      fontSize: (t.size / 100) * pdfWrapperWidth,
+                      lineHeight: FREE_TEXT_LINE_HEIGHT,
+                      color: t.color,
+                      whiteSpace: 'pre',
+                      outline: `${isSelected ? 2 : 1}px dashed ${isSelected ? '#0d6efd' : 'rgba(108, 117, 125, 0.6)'}`,
+                      outlineOffset: 2,
+                      cursor: 'move',
+                      touchAction: 'none',
+                      userSelect: 'none'
+                    }}
+                    onMouseDown={(e) => handleMouseDown(e, t.id, 'move', getElementRect(e.currentTarget, t), 'text')}
+                    onTouchStart={(e) => handleTouchStart(e, t.id, 'move', getElementRect(e.currentTarget, t), 'text')}
+                  >
+                    {t.text.trim() ? t.text : <span style={{ color: '#adb5bd', fontStyle: 'italic' }}>Empty text</span>}
+
+                    {/* Delete Button */}
+                    <div
+                      className="position-absolute bg-white rounded-circle shadow border d-flex align-items-center justify-content-center"
+                      style={{ top: -12, right: -12, width: 18, height: 18, fontSize: 11, lineHeight: 1, color: 'red', zIndex: 20, cursor: 'pointer', fontFamily: 'sans-serif' }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
+                      onClick={(e) => { e.stopPropagation(); onRemoveText(t.id); }}
+                      role="button"
+                      title="Remove"
+                    >×</div>
+
+                    {/* Resize Handle (Bottom Right): drag to make the text bigger or smaller */}
+                    <div
+                      className="position-absolute"
+                      style={{ right: -7, bottom: -7, width: 12, height: 12, backgroundColor: '#fff', border: '2px solid #0d6efd', borderRadius: 2, cursor: 'se-resize', zIndex: 20, touchAction: 'none' }}
+                      onMouseDown={(e) => handleMouseDown(e, t.id, 'resize', getElementRect(e.currentTarget.parentElement as HTMLElement, t), 'text')}
+                      onTouchStart={(e) => handleTouchStart(e, t.id, 'resize', getElementRect(e.currentTarget.parentElement as HTMLElement, t), 'text')}
+                      title="Drag to resize"
+                    />
+                  </div>
+                );
+              })}
 
               {/* Render Placeholders */}
               {pagePlaceholders.map(p => {

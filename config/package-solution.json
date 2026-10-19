@@ -30,12 +30,9 @@
         "title": "ESignV2 Feature",
         "description": "The feature that activates elements of the e-sign-project-node-20 solution.",
         "id": "fc57b932-3bdf-4c0d-b0e9-7bde7117ebd0",
-        "version": "1.9.1.6",
+        "version": "1.9.1.7",
         "assets": {
-          "elementManifests": [
-            "elements.xml",
-            "ClientSideInstance.xml"
-          ]
+          "elementManifests": ["elements.xml", "ClientSideInstance.xml"]
         }
       }
     ]

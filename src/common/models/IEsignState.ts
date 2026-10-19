@@ -66,6 +66,33 @@ export interface ISignaturePlaceholder {
 }
 
 /**
+ * One cell of a grid box: label in the header band and label at the bottom of the cell
+ */
+export interface IGridBoxCell {
+    header: string;
+    footer: string;
+}
+
+/**
+ * Optional grid box (approval stamp: title + table of cells) added by the requestor.
+ * Position and size are percentages (0-100) of the visual page.
+ */
+export interface IGridBox {
+    id: string;
+    page: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rows: number;
+    cols: number;
+    title: string;
+    /** Values typed on the dotted lines in the title area: left, middle (after the colon) and right */
+    fillIns?: [string, string, string];
+    cells: IGridBoxCell[];
+}
+
+/**
  * Props for InitiateEsignForm component
  */
 export interface IInitiateEsignFormProps {

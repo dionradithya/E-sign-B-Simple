@@ -7,6 +7,23 @@ import { ISignaturePlaceholder } from './PdfViewer';
 import { getSP } from '../../../common/pnpjsConfig';
 import { WhitelistService } from '../../../common/services/WhitelistService';
 import { TENANT_DOMAIN, SITES_ESIGN } from '../../../common/constants';
+import { IGridBox, IGridBoxCell, ITextAnnotation } from '../../../common/models/IEsignState';
+import { resizeGridBoxCells } from '../../../common/utils/GridBoxLayout';
+
+// Free text size is stored as % of page width; the sidebar shows it in pt on an A4 portrait page (595pt wide)
+const A4_WIDTH_PT = 595;
+const MIN_TEXT_PT = 4;
+const MAX_TEXT_PT = 96;
+const clampTextPt = (pt: number): number => Math.min(MAX_TEXT_PT, Math.max(MIN_TEXT_PT, Math.round(pt) || MIN_TEXT_PT));
+const sizeToPt = (size: number): number => Math.round((size / 100) * A4_WIDTH_PT);
+const ptToSize = (pt: number): number => (pt / A4_WIDTH_PT) * 100;
+
+const TEXT_COLORS = [
+    { label: 'Black', value: '#000000' },
+    { label: 'Blue', value: '#0D47A1' },
+    { label: 'Red', value: '#D4151C' },
+    { label: 'Green', value: '#0E5A36' }
+];
 
 export interface IApprover {
     id: number;
@@ -24,13 +41,41 @@ export interface IApprover {
 }
 
 /**
- * Small muted helper text used under labels and options
+ * Whether help texts are shown; toggled by "Hide help" / "Show help" in the sidebar header
  */
-const HelpText: React.FC<{ className?: string }> = ({ children, className }) => (
-    <div className={`text-muted ${className || ''}`} style={{ fontSize: 11, lineHeight: 1.4 }}>
-        {children}
-    </div>
-);
+const HelpVisibleContext = React.createContext<boolean>(true);
+
+const HELP_VISIBLE_STORAGE_KEY = 'esign-initiate-show-help';
+
+const readHelpVisible = (): boolean => {
+    try {
+        return localStorage.getItem(HELP_VISIBLE_STORAGE_KEY) !== 'false';
+    } catch {
+        return true;
+    }
+};
+
+const saveHelpVisible = (visible: boolean): void => {
+    try {
+        localStorage.setItem(HELP_VISIBLE_STORAGE_KEY, String(visible));
+    } catch {
+        // Storage unavailable (private mode, blocked): the choice just isn't remembered
+    }
+};
+
+/**
+ * Small muted helper text used under labels and options.
+ * Hidden when help is collapsed, unless `always` is set (for status messages, not explanations).
+ */
+const HelpText: React.FC<{ className?: string; always?: boolean }> = ({ children, className, always }) => {
+    const visible = React.useContext(HelpVisibleContext);
+    if (!visible && !always) return null;
+    return (
+        <div className={`text-muted ${className || ''}`} style={{ fontSize: 11, lineHeight: 1.4 }}>
+            {children}
+        </div>
+    );
+};
 
 interface ISidebarProps {
     context: WebPartContext;
@@ -53,6 +98,15 @@ interface ISidebarProps {
     numPages: number;
     visiblePage: number;
     onPlaceAtCenter: (approver: IApprover, type: 'initial' | 'signature') => void;
+    gridBoxes: IGridBox[];
+    onAddGridBox: () => void;
+    onUpdateGridBox: (id: string, updates: Partial<IGridBox>) => void;
+    onClearGridBoxes: () => void;
+    texts: ITextAnnotation[];
+    onAddText: () => void;
+    onUpdateText: (id: string, updates: Partial<ITextAnnotation>) => void;
+    onClearTexts: () => void;
+    selectedId: string | null;
 }
 
 const Sidebar: React.FC<ISidebarProps> = ({
@@ -76,6 +130,15 @@ const Sidebar: React.FC<ISidebarProps> = ({
     numPages,
     visiblePage,
     onPlaceAtCenter,
+    gridBoxes,
+    onAddGridBox,
+    onUpdateGridBox,
+    onClearGridBoxes,
+    texts,
+    onAddText,
+    onUpdateText,
+    onClearTexts,
+    selectedId,
 }): React.ReactElement => {
 
     // Temporary store for selected people picker items
@@ -108,7 +171,32 @@ const Sidebar: React.FC<ISidebarProps> = ({
     };
 
     const [addingApprover, setAddingApprover] = React.useState<boolean>(false);
-    const [showGuide, setShowGuide] = React.useState<boolean>(true);
+    const [showGuide, setShowGuide] = React.useState<boolean>(readHelpVisible);
+
+    const toggleGuide = (): void => {
+        setShowGuide(!showGuide);
+        saveHelpVisible(!showGuide);
+    };
+    const clampGridSize = (value: string): number => Math.min(10, Math.max(1, parseInt(value) || 1));
+
+    const selectedGridBox = gridBoxes.find(b => b.id === selectedId);
+    const selectedText = texts.find(t => t.id === selectedId);
+
+    const updateCell = (box: IGridBox, index: number, updates: Partial<IGridBoxCell>): void => {
+        onUpdateGridBox(box.id, { cells: box.cells.map((c, i) => i === index ? { ...c, ...updates } : c) });
+    };
+
+    const updateFillIn = (box: IGridBox, index: number, value: string): void => {
+        const fillIns: [string, string, string] = box.fillIns ? [...box.fillIns] as [string, string, string] : ['', '', ''];
+        fillIns[index] = value;
+        onUpdateGridBox(box.id, { fillIns });
+    };
+
+    // Bring the editor into view when a box or text is selected on the PDF
+    const selectedEditorRef = React.useRef<HTMLDivElement>(null);
+    React.useEffect(() => {
+        selectedEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, [selectedId]);
 
     const handleAddApprover = async (): Promise<void> => {
         if (!selectedPickerItems || selectedPickerItems.length === 0) return;
@@ -243,6 +331,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
 
 
     return (
+        <HelpVisibleContext.Provider value={showGuide}>
         <div className="p-3 bg-white border-start h-100" style={{ overflowY: 'auto' }}>
             <div className="d-flex justify-content-between align-items-center mb-2">
                 <h5 className="mb-0">Workflow Setup</h5>
@@ -250,10 +339,11 @@ const Sidebar: React.FC<ISidebarProps> = ({
                     type="button"
                     className="btn btn-link btn-sm p-0"
                     style={{ fontSize: 12 }}
-                    onClick={() => setShowGuide(!showGuide)}
+                    onClick={toggleGuide}
                     aria-expanded={showGuide}
+                    title={showGuide ? 'Hide the guide and all explanations' : 'Show the guide and all explanations'}
                 >
-                    {showGuide ? 'Hide guide' : 'Show guide'}
+                    {showGuide ? 'Hide help' : 'Show help'}
                 </button>
             </div>
 
@@ -386,7 +476,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
                                         }}
                                     />
                                     {!approver.badgeNumber && (
-                                        <HelpText className="ms-4">No badge number registered for this approver.</HelpText>
+                                        <HelpText className="ms-4" always>No badge number registered for this approver.</HelpText>
                                     )}
 
                                     <div className="mt-2 mb-3">
@@ -672,6 +762,207 @@ const Sidebar: React.FC<ISidebarProps> = ({
                 </Stack>
             </div>
 
+            <div className="mb-4">
+                <Label>3. Approval Box (Optional)</Label>
+                <HelpText className="mb-2">
+                    Adds an approval box (Received From PIC, Validation By, Checked By, Approved By) on the page you are viewing now{numPages ? ` (page ${visiblePage} of ${numPages})` : ''}.
+                    Click a box to edit its labels here. Drag it to move, drag its bottom-right corner to resize, and click × to remove it.
+                    The box is drawn permanently onto the document when you click Process Workflow.
+                </HelpText>
+                <div className="d-flex gap-2">
+                    <button
+                        type="button"
+                        className="btn btn-sm btn-outline-secondary flex-grow-1"
+                        disabled={!fileLoaded}
+                        onClick={onAddGridBox}
+                    >
+                        Add Box
+                    </button>
+                    <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        disabled={gridBoxes.length === 0}
+                        onClick={onClearGridBoxes}
+                    >
+                        Clear ({gridBoxes.length})
+                    </button>
+                </div>
+
+                {selectedGridBox && (
+                    <div ref={selectedEditorRef} className="mt-2 p-2 border rounded" style={{ borderColor: '#0d6efd', fontSize: 12 }}>
+                        <div className="fw-bold mb-2">Edit Box (page {selectedGridBox.page})</div>
+
+                        <label className="form-label mb-1" style={{ fontSize: 12 }}>Title</label>
+                        <input
+                            type="text"
+                            value={selectedGridBox.title}
+                            className="form-control form-control-sm mb-2"
+                            onChange={(e) => onUpdateGridBox(selectedGridBox.id, { title: e.target.value })}
+                        />
+
+                        <label className="form-label mb-1" style={{ fontSize: 12 }}>Dotted lines (optional)</label>
+                        <div className="d-flex align-items-center gap-1 mb-1">
+                            <input
+                                type="text"
+                                placeholder="Left"
+                                value={selectedGridBox.fillIns?.[0] || ''}
+                                className="form-control form-control-sm"
+                                onChange={(e) => updateFillIn(selectedGridBox, 0, e.target.value)}
+                            />
+                            <span className="fw-bold">:</span>
+                            <input
+                                type="text"
+                                placeholder="Middle"
+                                value={selectedGridBox.fillIns?.[1] || ''}
+                                className="form-control form-control-sm"
+                                onChange={(e) => updateFillIn(selectedGridBox, 1, e.target.value)}
+                            />
+                        </div>
+                        <input
+                            type="text"
+                            placeholder="Right (under the title)"
+                            value={selectedGridBox.fillIns?.[2] || ''}
+                            className="form-control form-control-sm mb-1"
+                            onChange={(e) => updateFillIn(selectedGridBox, 2, e.target.value)}
+                        />
+                        <HelpText className="mb-2">Typed on the dotted lines. Leave empty to keep the dots blank for writing by hand.</HelpText>
+
+                        <div className="d-flex gap-2 mb-2">
+                            <div className="flex-grow-1">
+                                <label className="form-label mb-1" style={{ fontSize: 12 }}>Rows</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={10}
+                                    value={selectedGridBox.rows}
+                                    className="form-control form-control-sm"
+                                    onChange={(e) => {
+                                        const rows = clampGridSize(e.target.value);
+                                        onUpdateGridBox(selectedGridBox.id, { rows, cells: resizeGridBoxCells(selectedGridBox.cells, rows, selectedGridBox.cols) });
+                                    }}
+                                />
+                            </div>
+                            <div className="flex-grow-1">
+                                <label className="form-label mb-1" style={{ fontSize: 12 }}>Columns</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={10}
+                                    value={selectedGridBox.cols}
+                                    className="form-control form-control-sm"
+                                    onChange={(e) => {
+                                        const cols = clampGridSize(e.target.value);
+                                        onUpdateGridBox(selectedGridBox.id, { cols, cells: resizeGridBoxCells(selectedGridBox.cells, selectedGridBox.rows, cols) });
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {selectedGridBox.cells.map((cell, i) => (
+                            <div key={i} className="mb-2">
+                                <div className="text-muted mb-1" style={{ fontSize: 11 }}>
+                                    Cell {i + 1} (row {Math.floor(i / selectedGridBox.cols) + 1}, column {(i % selectedGridBox.cols) + 1})
+                                </div>
+                                <div className="d-flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="Header (e.g. Checked By)"
+                                        value={cell.header}
+                                        className="form-control form-control-sm"
+                                        onChange={(e) => updateCell(selectedGridBox, i, { header: e.target.value })}
+                                    />
+                                    <input
+                                        type="text"
+                                        placeholder="Bottom (e.g. Treasury)"
+                                        value={cell.footer}
+                                        className="form-control form-control-sm"
+                                        onChange={(e) => updateCell(selectedGridBox, i, { footer: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            <div className="mb-4">
+                <Label>4. Text (Optional)</Label>
+                <HelpText className="mb-2">
+                    Adds text on the page you are viewing now{numPages ? ` (page ${visiblePage} of ${numPages})` : ''}. Type the text below, then drag it on the PDF to the right spot.
+                    Click a text to edit it again, and click × to remove it. The text is drawn permanently onto the document when you click Process Workflow.
+                </HelpText>
+                <div className="d-flex gap-2">
+                    <button
+                        type="button"
+                        className="btn btn-sm btn-outline-secondary flex-grow-1"
+                        disabled={!fileLoaded}
+                        onClick={onAddText}
+                    >
+                        Add Text
+                    </button>
+                    <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        disabled={texts.length === 0}
+                        onClick={onClearTexts}
+                    >
+                        Clear ({texts.length})
+                    </button>
+                </div>
+
+                {selectedText && (
+                    <div ref={selectedEditorRef} className="mt-2 p-2 border rounded" style={{ borderColor: '#0d6efd', fontSize: 12 }}>
+                        <div className="fw-bold mb-2">Edit Text (page {selectedText.page})</div>
+                        <textarea
+                            autoFocus
+                            rows={3}
+                            placeholder="Type text here..."
+                            value={selectedText.text}
+                            className="form-control form-control-sm mb-2"
+                            onChange={(e) => onUpdateText(selectedText.id, { text: e.target.value })}
+                        />
+                        <div className="d-flex gap-2">
+                            <div className="flex-grow-1">
+                                <label className="form-label mb-1" style={{ fontSize: 12 }}>Size (pt)</label>
+                                <div className="input-group input-group-sm">
+                                    <button
+                                        type="button"
+                                        className="btn btn-outline-secondary"
+                                        title="Smaller"
+                                        onClick={() => onUpdateText(selectedText.id, { size: ptToSize(clampTextPt(sizeToPt(selectedText.size) - 1)) })}
+                                    >A-</button>
+                                    <input
+                                        type="number"
+                                        min={MIN_TEXT_PT}
+                                        max={MAX_TEXT_PT}
+                                        value={sizeToPt(selectedText.size)}
+                                        className="form-control text-center"
+                                        onChange={(e) => onUpdateText(selectedText.id, { size: ptToSize(clampTextPt(Number(e.target.value))) })}
+                                    />
+                                    <button
+                                        type="button"
+                                        className="btn btn-outline-secondary"
+                                        title="Bigger"
+                                        onClick={() => onUpdateText(selectedText.id, { size: ptToSize(clampTextPt(sizeToPt(selectedText.size) + 1)) })}
+                                    >A+</button>
+                                </div>
+                            </div>
+                            <div className="flex-grow-1">
+                                <label className="form-label mb-1" style={{ fontSize: 12 }}>Color</label>
+                                <select
+                                    className="form-select form-select-sm"
+                                    value={selectedText.color}
+                                    onChange={(e) => onUpdateText(selectedText.id, { color: e.target.value })}
+                                >
+                                    {TEXT_COLORS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                        <HelpText className="mt-1">You can also drag the text&apos;s bottom-right corner on the PDF to make it bigger or smaller. Size is based on an A4 portrait page.</HelpText>
+                    </div>
+                )}
+            </div>
+
             <div className="mt-auto pt-3 border-top">
                 <div className="mb-3">
                     <Toggle
@@ -693,7 +984,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
                         offText="No"
                         styles={{ root: { marginBottom: 0 }, label: { fontSize: 12, fontWeight: 600 } }}
                     />
-                    <p className="text-muted small mb-0" style={{ fontSize: 11, marginTop: 2 }}>QR code will be placed at the bottom-right corner of last page.</p>
+                    <HelpText className="mt-1">QR code will be placed at the bottom-right corner of last page.</HelpText>
                 </div>
                 <PrimaryButton
                     text={isSaving ? "Processing..." : "Process Workflow"}
@@ -703,6 +994,7 @@ const Sidebar: React.FC<ISidebarProps> = ({
                 />
             </div>
         </div>
+        </HelpVisibleContext.Provider>
     );
 };
 
